@@ -1,0 +1,8 @@
+build/
+*.AppImage
+*.log
+*.swp
+*.o
+*.a
+*.so
+.DS_Store

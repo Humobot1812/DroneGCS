@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GCS Map</title>
+<link rel="stylesheet" href="leaflet/leaflet.css">
+<link rel="stylesheet" href="leaflet/leaflet.draw.css">
+<!-- Fallback CDN in case local asset fails -->
+<script>
+  function loadFallbackCss(href) {
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = href;
+    document.head.appendChild(link);
+  }
+</script>
+<style>
+  html, body {
+    width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+    background-color: #0d1117;
+  }
+  #map {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: 100%; height: 100%;
+    background-color: #0d1117;
+  }
+
+  /* Custom Drone popup style */
+  .drone-popup .leaflet-popup-content-wrapper {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+  }
+  .drone-popup .leaflet-popup-tip { background: #161b22; }
+
+  /* Coordinate HUD bar at bottom */
+  #coord-hud {
+    position: absolute;
+    bottom: 10px;
+    left: 12px;
+    z-index: 1000;
+    background: rgba(13, 17, 23, 0.88);
+    backdrop-filter: blur(10px);
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 5px 12px;
+    color: #8b949e;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: 11px;
+    pointer-events: none;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+  #coord-hud span b {
+    color: #00d4ff;
+    font-weight: 600;
+  }
+
+  /* Mode indicator badge */
+  #mode-badge {
+    position: absolute;
+    top: 12px;
+    left: 50px;
+    z-index: 1000;
+    background: rgba(13, 17, 23, 0.9);
+    border: 1px solid #00d4ff;
+    border-radius: 6px;
+    padding: 4px 10px;
+    color: #00d4ff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: bold;
+    display: none;
+  }
+
+  /* Leaflet layer control dark theme styling */
+  .leaflet-control-layers {
+    background: #161b22 !important;
+    border: 1px solid #30363d !important;
+    border-radius: 8px !important;
+    color: #e6edf3 !important;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.6) !important;
+  }
+  .leaflet-control-layers-expanded {
+    padding: 10px 14px !important;
+  }
+  .leaflet-control-layers-separator {
+    border-top: 1px solid #30363d !important;
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="mode-badge">🎯 CLICK ON MAP TO FLY HERE</div>
+
+<div id="coord-hud">
+  <span>LAT: <b id="hud-lat">28.613939°</b></span>
+  <span>LON: <b id="hud-lon">77.209021°</b></span>
+  <span>ZOOM: <b id="hud-zoom">16</b></span>
+  <span>LAYER: <b id="hud-layer">Google Hybrid</b></span>
+</div>
+
+<script src="leaflet/leaflet.js"></script>
+<script>
+  if (typeof L === 'undefined') {
+    document.write('<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>');
+    loadFallbackCss('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css');
+  }
+</script>
+<script src="leaflet/leaflet.draw.js"></script>
+<script src="qwebchannel.js"></script>
+<script src="map.js"></script>
+</body>
+</html>
