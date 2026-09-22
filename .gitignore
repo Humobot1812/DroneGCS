@@ -10,3 +10,4 @@ sample_*.wav
 .cache/
 .claude/
 aqtinstall.log
+*.mp4
