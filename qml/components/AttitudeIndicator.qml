@@ -16,6 +16,16 @@ Item {
     Behavior on roll  { NumberAnimation { duration: 60; easing.type: Easing.OutCubic } }
     Behavior on pitch { NumberAnimation { duration: 60; easing.type: Easing.OutCubic } }
 
+    // ── MIL-STD-1472H Anti-Glare High-Contrast Backing Plate ────────────────
+    Rectangle {
+        anchors.fill: parent
+        radius: Math.min(width, height) / 2
+        color: "#0d1117"
+        opacity: 0.92
+        border.color: "#30363d"
+        border.width: 2
+    }
+
     Canvas {
         id: canvas
         anchors.fill: parent

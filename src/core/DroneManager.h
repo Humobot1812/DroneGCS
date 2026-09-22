@@ -5,7 +5,7 @@
 #include "DroneVehicle.h"
 
 class MAVLinkBridge;
-class AbstractLink;  // forward declare for m_links
+class AbstractLink;
 
 /**
  * DroneManager — owns and manages a collection of DroneVehicle instances.
@@ -17,7 +17,7 @@ class DroneManager : public QAbstractListModel
     Q_PROPERTY(int droneCount READ droneCount NOTIFY droneCountChanged)
     Q_PROPERTY(int activeDroneIndex READ activeDroneIndex WRITE setActiveDroneIndex NOTIFY activeDroneIndexChanged)
     Q_PROPERTY(DroneVehicle* activeDrone READ activeDrone NOTIFY activeDroneChanged)
-    Q_PROPERTY(bool isSimulating READ isSimulating NOTIFY simulationStateChanged)
+    Q_PROPERTY(bool isSimulating READ isSimulating CONSTANT)
 
 public:
     enum DroneRoles {
@@ -42,6 +42,7 @@ public:
     int activeDroneIndex() const { return m_activeDroneIndex; }
     DroneVehicle* activeDrone() const;
     DroneVehicle* droneById(int sysId) const;
+    bool isSimulating() const { return false; }
 
     // Connection colors per drone slot
     static const QStringList k_droneColors;
@@ -54,12 +55,9 @@ public slots:
     Q_INVOKABLE void removeConnection(int index);
     Q_INVOKABLE void setActiveDroneIndex(int index);
     Q_INVOKABLE QStringList availableSerialPorts() const;
+    Q_INVOKABLE void autoConnect();   // Scan & connect to first known FC port
     Q_INVOKABLE DroneVehicle* droneAt(int index) const;
-
-    // Simulation & Demo
-    Q_INVOKABLE void startSimulation(int droneCount = 2);
-    Q_INVOKABLE void stopSimulation();
-    bool isSimulating() const { return m_simTimer != nullptr && m_simTimer->isActive(); }
+    DroneVehicle* getOrCreateDrone(quint8 sysId);
 
     // Swarm Master Commands
     Q_INVOKABLE void armAll();
@@ -77,15 +75,10 @@ signals:
     void activeDroneChanged();
     void droneAdded(DroneVehicle *drone);
     void droneRemoved(int index);
-    void simulationStateChanged();
+    void autoConnectStatus(bool success, const QString &transport, const QString &message);  // per-transport result
 
 private:
-    DroneVehicle* getOrCreateDrone(quint8 sysId);
-
     QList<DroneVehicle*>  m_drones;
     QList<AbstractLink*>  m_links;    // all registered transport links
     int m_activeDroneIndex = -1;
-
-    QTimer *m_simTimer = nullptr;
-    double m_simTime = 0.0;
 };

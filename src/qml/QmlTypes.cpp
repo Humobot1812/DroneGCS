@@ -3,6 +3,7 @@
 #include "../core/DroneVehicle.h"
 #include "../core/MissionPlanner.h"
 #include "../core/AppSettings.h"
+#include "../core/AudioAnnunciator.h"
 #include "../python/PythonBridge.h"
 #include "../video/VideoManager.h"
 
@@ -16,4 +17,6 @@ void registerQmlTypes()
         "DroneManager is a singleton created in main.cpp");
     qmlRegisterUncreatableType<AppSettings>("GCS", 1, 0, "AppSettings",
         "AppSettings is a singleton created in main.cpp");
+    qmlRegisterUncreatableType<AudioAnnunciator>("GCS", 1, 0, "AudioAnnunciator",
+        "AudioAnnunciator is a singleton created in main.cpp");
 }

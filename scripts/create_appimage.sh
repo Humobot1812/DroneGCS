@@ -36,9 +36,12 @@ mkdir -p "$APPDIR/map"
 cp -r "$PROJECT_DIR/map/"* "$APPDIR/map/"
 
 # 2. Copy Qt6 Libraries
-echo "[2/6] Bundling Qt 6.2.4 core runtime libraries..."
+echo "[2/6] Bundling Qt 6.2.4 core runtime libraries & OpenSSL 1.1..."
 cp -P "$QT_PATH/lib"/libQt6*.so* "$APPDIR/usr/lib/" 2>/dev/null || true
 cp -P "$QT_PATH/lib"/libicu*.so* "$APPDIR/usr/lib/" 2>/dev/null || true
+if [ -d "$PROJECT_DIR/lib" ]; then
+    cp -P "$PROJECT_DIR/lib"/lib*.so* "$APPDIR/usr/lib/" 2>/dev/null || true
+fi
 
 # 3. Copy Qt Plugins & WebEngine helper
 echo "[3/6] Bundling Qt plugins & WebEngine process..."
@@ -116,7 +119,7 @@ im.save('$APPDIR/DRONE_GCS.png')
 echo ""
 echo "Creating AppImage using appimagetool..."
 rm -f "$OUTPUT_APPIMAGE"
-ARCH=x86_64 "$PROJECT_DIR/tools/appimagetool/AppRun" "$APPDIR" "$OUTPUT_APPIMAGE"
+ARCH=x86_64 "$PROJECT_DIR/tools/appimagetool/AppRun" --runtime-file "$PROJECT_DIR/tools/runtime-x86_64" "$APPDIR" "$OUTPUT_APPIMAGE"
 
 chmod +x "$OUTPUT_APPIMAGE"
 

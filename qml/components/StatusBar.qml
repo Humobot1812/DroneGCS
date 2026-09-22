@@ -9,14 +9,16 @@ Rectangle {
 
     Rectangle {
         anchors { top: parent.top; left: parent.left; right: parent.right }
-        height: 1; color: "#21262d"
+        height: 1
+        color: "#21262d"
     }
 
     property var drone: droneManager.activeDrone
+    signal connectClicked()
 
     RowLayout {
-        anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
-        spacing: 16
+        anchors { fill: parent; leftMargin: 28; rightMargin: 28 }
+        spacing: 20
 
         // Heartbeat LED
         LEDIndicator {
@@ -30,25 +32,39 @@ Rectangle {
         LEDIndicator {
             active: drone ? drone.gpsFixType >= 3 : false
             color: "#3fb950"
-            label: drone ? ("GPS " + drone.gpsSats + "sat") : "GPS"
+            label: drone ? ("GPS " + drone.gpsSats + " sat") : "GPS"
         }
 
         // Battery
         Row {
-            spacing: 5
-            Text {
-                text: "🔋"
-                font.pixelSize: 13
-                color: drone && drone.batteryPercent >= 0
-                       ? (drone.batteryPercent > 30 ? "#3fb950" : "#f85149")
-                       : "#7d8590"
+            spacing: 10
+            Rectangle {
+                width: 54
+                height: 34
+                radius: 5
+                color: "#161b22"
+                border.color: drone && drone.batteryPercent >= 0
+                              ? (drone.batteryPercent > 30 ? "#3fb950" : "#f85149")
+                              : "#30363d"
+                border.width: 1
                 anchors.verticalCenter: parent.verticalCenter
+
+                Text {
+                    text: "BAT"
+                    font.pixelSize: 14
+                    font.bold: true
+                    color: drone && drone.batteryPercent >= 0
+                           ? (drone.batteryPercent > 30 ? "#3fb950" : "#f85149")
+                           : "#7d8590"
+                    anchors.centerIn: parent
+                }
             }
+
             Text {
                 text: drone && drone.batteryPercent >= 0
-                      ? (drone.batteryPercent + "% " + drone.batteryVoltage.toFixed(2) + "V")
+                      ? (drone.batteryPercent + "% (" + drone.batteryVoltage.toFixed(2) + "V)")
                       : "—"
-                font.pixelSize: 12
+                font.pixelSize: 14
                 color: "#e6edf3"
                 font.bold: true
                 font.family: "JetBrains Mono, monospace"
@@ -56,23 +72,24 @@ Rectangle {
             }
         }
 
-        // Flight mode (with robust Layout sizing so mode text like STABILIZE never overflows)
+        // Flight mode
         Rectangle {
             id: modeRect
-            implicitWidth: modeText.implicitWidth + 24
-            implicitHeight: 24
+            implicitWidth: modeText.implicitWidth + 28
+            implicitHeight: 38
             Layout.preferredWidth: implicitWidth
-            Layout.preferredHeight: 24
-            radius: 5
-            color: drone && drone.isArmed ? "#2d1b1b" : "#1b2d1b"
+            Layout.preferredHeight: 38
+            radius: 6
+            color: drone && drone.isArmed ? "#2d1414" : "#142618"
             border.color: drone && drone.isArmed ? "#f85149" : "#3fb950"
             border.width: 1
 
             Text {
                 id: modeText
-                text: drone ? drone.flightMode : "—"
+                text: drone ? drone.flightMode : "DISCONNECTED"
                 color: drone && drone.isArmed ? "#f85149" : "#3fb950"
-                font.pixelSize: 12; font.bold: true
+                font.pixelSize: 16
+                font.bold: true
                 font.family: "JetBrains Mono, monospace"
                 anchors.centerIn: parent
             }
@@ -82,39 +99,94 @@ Rectangle {
 
         // Mission progress
         Row {
-            spacing: 6
+            spacing: 10
             visible: drone && drone.missionTotal > 0
-            Text { text: "WP"; font.pixelSize: 11; font.bold: true; color: "#7d8590"; anchors.verticalCenter: parent.verticalCenter }
+            Text {
+                text: "WP"
+                font.pixelSize: 14
+                font.bold: true
+                color: "#7d8590"
+                anchors.verticalCenter: parent.verticalCenter
+            }
             Text {
                 text: drone ? (drone.missionCurrent + "/" + drone.missionTotal) : "—"
-                font.pixelSize: 12; font.bold: true; color: "#00d4ff"
+                font.pixelSize: 14
+                font.bold: true
+                color: "#00d4ff"
                 font.family: "JetBrains Mono, monospace"
                 anchors.verticalCenter: parent.verticalCenter
             }
             // Progress bar
             Rectangle {
-                width: 90; height: 7; radius: 3; color: "#21262d"
+                width: 120
+                height: 10
+                radius: 5
+                color: "#21262d"
                 anchors.verticalCenter: parent.verticalCenter
                 Rectangle {
                     width: drone && drone.missionTotal > 0
                            ? parent.width * (drone.missionCurrent / drone.missionTotal) : 0
-                    height: parent.height; radius: parent.radius; color: "#00d4ff"
+                    height: parent.height
+                    radius: parent.radius
+                    color: "#00d4ff"
                     Behavior on width { NumberAnimation { duration: 300 } }
                 }
             }
         }
 
-        // "Add connection" button
+        // Link status indicator
+        Row {
+            spacing: 10
+            Rectangle {
+                width: 12
+                height: 12
+                radius: 6
+                color: drone && drone.isConnected ? "#3fb950" : "#7d8590"
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            Text {
+                text: drone && drone.isConnected ? (drone.name || "LINK ACTIVE") : "NO LINK"
+                font.pixelSize: 14
+                font.bold: true
+                color: drone && drone.isConnected ? "#8b949e" : "#7d8590"
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
+
+        // "+ Connect" button
         Rectangle {
-            Layout.preferredWidth: 110; Layout.preferredHeight: 26
-            radius: 5
-            color: addMa.containsMouse ? "#00d4ff20" : "#161b22"
-            border.color: "#00d4ff"; border.width: 1
-            Text { text: "+ Connect"; color: "#00d4ff"; font.pixelSize: 12; font.bold: true; anchors.centerIn: parent }
+            Layout.preferredWidth: 130
+            Layout.preferredHeight: 38
+            radius: 6
+            color: connectMa.containsMouse ? "#00d4ff25" : "#161b22"
+            border.color: "#00d4ff"
+            border.width: 1
+
+            Row {
+                anchors.centerIn: parent
+                spacing: 6
+                Text {
+                    text: "+"
+                    color: "#00d4ff"
+                    font.pixelSize: 18
+                    font.bold: true
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                Text {
+                    text: "Connect"
+                    color: "#00d4ff"
+                    font.pixelSize: 16
+                    font.bold: true
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+            }
+
             MouseArea {
-                id: addMa; anchors.fill: parent; hoverEnabled: true
+                id: connectMa
+                anchors.fill: parent
+                hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: connectionDialog.open()
+                onClicked: root.connectClicked()
             }
         }
     }

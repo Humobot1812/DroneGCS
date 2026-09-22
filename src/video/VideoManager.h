@@ -9,6 +9,7 @@ class VideoManager : public QObject
     Q_OBJECT
     Q_PROPERTY(bool isPlaying    READ isPlaying    NOTIFY playingChanged)
     Q_PROPERTY(QString streamUrl READ streamUrl    WRITE setStreamUrl NOTIFY streamUrlChanged)
+    Q_PROPERTY(QVideoSink* videoSink READ videoSink WRITE setVideoSink NOTIFY videoSinkChanged)
 
 public:
     explicit VideoManager(QObject *parent = nullptr);
@@ -22,10 +23,12 @@ public:
     Q_INVOKABLE void stop();
 
     QVideoSink* videoSink() const { return m_sink; }
+    Q_INVOKABLE void setVideoSink(QVideoSink *sink);
 
 signals:
     void playingChanged();
     void streamUrlChanged();
+    void videoSinkChanged();
 
 private:
     QMediaPlayer *m_player   = nullptr;

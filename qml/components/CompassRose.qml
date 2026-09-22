@@ -17,11 +17,14 @@ Canvas {
 
         ctx.clearRect(0, 0, width, height);
 
-        // Background circle
+        // Background circle with MIL-STD anti-glare bezel
         ctx.fillStyle = "#0d1117";
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, 2 * Math.PI);
         ctx.fill();
+        ctx.strokeStyle = "#30363d";
+        ctx.lineWidth = 2;
+        ctx.stroke();
 
         ctx.save();
         ctx.translate(cx, cy);

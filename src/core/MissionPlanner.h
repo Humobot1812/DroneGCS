@@ -28,7 +28,8 @@ public:
     Q_INVOKABLE QVariantList generateZigzag(const QVariantList &polygon,
                                              double spacingM,
                                              double homeLat,
-                                             double homeLon);
+                                             double homeLon,
+                                             double altitudeM = 15.0);
 
     /**
      * Build MAVLink MISSION_ITEM_INT packets for a waypoint list.

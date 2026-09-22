@@ -1,11 +1,12 @@
 #include "VideoManager.h"
 #include <QDebug>
+#include <QUrl>
 
 VideoManager::VideoManager(QObject *parent)
     : QObject(parent)
 {
-    m_sink   = new QVideoSink(this);
     m_player = new QMediaPlayer(this);
+    m_sink   = new QVideoSink(this);
     m_player->setVideoSink(m_sink);
 
     connect(m_player, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState state) {
@@ -20,6 +21,15 @@ VideoManager::VideoManager(QObject *parent)
 VideoManager::~VideoManager()
 {
     stop();
+}
+
+void VideoManager::setVideoSink(QVideoSink *sink)
+{
+    if (m_sink != sink && sink != nullptr) {
+        m_sink = sink;
+        m_player->setVideoSink(m_sink);
+        emit videoSinkChanged();
+    }
 }
 
 void VideoManager::setStreamUrl(const QString &url)

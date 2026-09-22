@@ -45,6 +45,10 @@ set(GCS_SOURCES
     src/core/MissionPlanner.cpp
     src/core/AppSettings.h
     src/core/AppSettings.cpp
+    src/core/AudioAnnunciator.h
+    src/core/AudioAnnunciator.cpp
+    src/core/AiAssistant.h
+    src/core/AiAssistant.cpp
 
     # MAVLink links
     src/mavlink/AbstractLink.h
@@ -82,19 +86,36 @@ qt_add_qml_module(DRONE_GCS
         qml/components/StatusBar.qml
         qml/components/DroneSelector.qml
         qml/components/ConnectionDialog.qml
+        qml/components/AboutDialog.qml
         qml/components/AttitudeIndicator.qml
         qml/components/CompassRose.qml
         qml/components/SpeedAltGauge.qml
         qml/components/BatteryWidget.qml
         qml/components/LEDIndicator.qml
         qml/components/SettingsDialog.qml
+        qml/components/SlideToConfirm.qml
+        qml/components/PreFlightChecklist.qml
+        qml/components/GeofenceConsole.qml
+        qml/components/TelemetryGrapher.qml
+        qml/components/MissionProfileChart.qml
+        qml/components/WaypointEditorDrawer.qml
+        qml/components/PipVideoWidget.qml
+        qml/components/FlightLogDialog.qml
+        qml/components/AiCopilotDrawer.qml
+        qml/components/FlightReplayBar.qml
         qml/pages/DashboardPage.qml
         qml/pages/MapPage.qml
         qml/pages/MissionPage.qml
         qml/pages/ParametersPage.qml
         qml/pages/VideoPage.qml
-    RESOURCES
-        resources/assets.qrc
+)
+
+# ─── Static image resources (logo, icons) ─────────────────────────────────────
+qt_add_resources(DRONE_GCS "assets"
+    PREFIX "/"
+    BASE "resources"
+    FILES
+        resources/logo.png
 )
 
 # ─── Map & Python scripts (copy to build) ─────────────────────────────────────
@@ -134,6 +155,18 @@ target_link_libraries(DRONE_GCS PRIVATE
 
 target_include_directories(DRONE_GCS PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+)
+
+# ─── Library RPATH & SSL Bundling ─────────────────────────────────────────────
+set_target_properties(DRONE_GCS PROPERTIES
+    BUILD_RPATH "$ORIGIN/lib;$ORIGIN/../lib"
+    INSTALL_RPATH "$ORIGIN/lib;$ORIGIN/../lib"
+)
+
+add_custom_command(TARGET DRONE_GCS POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/lib ${CMAKE_BINARY_DIR}/lib
+    COMMENT "Copying runtime SSL libraries to build/lib"
 )
 
 # ─── Install ──────────────────────────────────────────────────────────────────

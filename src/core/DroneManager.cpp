@@ -234,129 +234,72 @@ void DroneManager::setActiveDroneIndex(int index)
 
 QStringList DroneManager::availableSerialPorts() const
 {
-    QStringList ports;
-    for (const auto &info : QSerialPortInfo::availablePorts())
-        ports << info.portName();
-    return ports;
-}
+    QStringList fcPorts;   // ttyACM* and ttyUSB* first — most likely flight controllers
+    QStringList otherPorts;
 
-void DroneManager::startSimulation(int droneCount)
-{
-    if (m_simTimer && m_simTimer->isActive()) return;
-
-    for (int i = 1; i <= droneCount; ++i) {
-        DroneVehicle *d = getOrCreateDrone(static_cast<quint8>(i));
-        if (i == 1) {
-            d->setName("Alpha-1 (Quadcopter)");
-            d->setVehicleType("Quadrotor");
-            d->setAutopilotType("ArduPilot");
-        } else if (i == 2) {
-            d->setName("Beta-2 (Quadcopter)");
-            d->setVehicleType("Quadrotor");
-            d->setAutopilotType("PX4");
-        } else {
-            d->setName(QString("Drone-%1").arg(i));
-            d->setVehicleType("Quadrotor");
-            d->setAutopilotType("ArduPilot");
-        }
+    for (const auto &info : QSerialPortInfo::availablePorts()) {
+        const QString name = info.portName();  // e.g. "ttyACM0", "ttyUSB0", "ttyS4"
+        if (name.startsWith("ttyACM") || name.startsWith("ttyUSB"))
+            fcPorts << name;
+        else
+            otherPorts << name;
     }
 
-    if (!m_simTimer) {
-        m_simTimer = new QTimer(this);
-        m_simTimer->setInterval(40); // 25 Hz smooth telemetry
-        connect(m_simTimer, &QTimer::timeout, this, [this]() {
-            m_simTime += 0.04;
-            double t = m_simTime;
+    fcPorts.sort();
+    otherPorts.sort();
+    return fcPorts + otherPorts;  // FC ports on top
+}
 
-            const double centerLat = 28.613939;
-            const double centerLon = 77.209021;
-            const double degPerMeter = 1.0 / 111320.0;
+void DroneManager::autoConnect()
+{
+    // ── 1. SERIAL: scan for flight controller USB ports ───────────────────────
+    static const QStringList k_fcPrefixes = { "ttyACM", "ttyUSB" };
+    static const int k_serialBaud = 57600;
 
-            for (int i = 0; i < m_drones.count(); ++i) {
-                DroneVehicle *d = m_drones.at(i);
-                if (!d) continue;
-
-                if (i == 0) {
-                    double omega = 0.15;
-                    double radius = 150.0;
-                    double angle = omega * t;
-                    double dLat = radius * std::cos(angle) * degPerMeter;
-                    double dLon = radius * std::sin(angle) * degPerMeter / std::cos(centerLat * M_PI / 180.0);
-                    double lat = centerLat + dLat;
-                    double lon = centerLon + dLon;
-
-                    double headingRad = std::atan2(std::cos(angle), -std::sin(angle));
-                    double headingDeg = std::fmod(headingRad * 180.0 / M_PI + 360.0, 360.0);
-
-                    double roll = 14.0 * std::sin(t * 0.5);
-                    double pitch = -3.0 + 1.5 * std::cos(t * 0.8);
-                    double yaw = headingDeg;
-
-                    double alt = 25.0 + 3.0 * std::sin(t * 0.2);
-                    double relAlt = alt;
-                    double speed = 12.4 + 0.8 * std::sin(t * 0.3);
-                    double climbRate = 0.6 * std::cos(t * 0.2);
-
-                    int bat = std::max(20, 95 - static_cast<int>(t / 20.0));
-                    double batVolt = 21.8 + (bat / 100.0) * 3.4;
-
-                    QString status = (static_cast<int>(t) % 15 == 0) ? "EKF3 IMU0 is using GPS" :
-                                     (static_cast<int>(t) % 25 == 0) ? "Waypoint 3 reached" : "";
-
-                    QString currentMode = d->flightMode().isEmpty() ? "GUIDED" : d->flightMode();
-                    d->updateSimulatedTelemetry(lat, lon, alt, relAlt, headingDeg,
-                                                roll, pitch, yaw, speed, speed, climbRate,
-                                                bat, batVolt, 14, 0.9, d->isArmed(), currentMode, status);
-                } else if (i == 1) {
-                    double omega = 0.11;
-                    double radius = 220.0;
-                    double angle = omega * t;
-                    double dLat = radius * std::sin(angle) * degPerMeter;
-                    double dLon = (radius * 1.4) * std::sin(angle * 2.0) * 0.5 * degPerMeter / std::cos(centerLat * M_PI / 180.0);
-                    double lat = (centerLat + 0.002) + dLat;
-                    double lon = (centerLon + 0.002) + dLon;
-
-                    double vx = radius * omega * std::cos(angle);
-                    double vy = (radius * 1.4) * omega * std::cos(angle * 2.0);
-                    double headingRad = std::atan2(vy, vx);
-                    double headingDeg = std::fmod(headingRad * 180.0 / M_PI + 360.0, 360.0);
-
-                    double roll = -18.0 * std::cos(angle * 2.0);
-                    double pitch = -4.0 + 2.0 * std::sin(t * 0.6);
-                    double yaw = headingDeg;
-
-                    double alt = 45.0 + 5.0 * std::sin(t * 0.15);
-                    double relAlt = alt;
-                    double speed = 15.2 + 1.2 * std::sin(t * 0.4);
-                    double climbRate = 0.75 * std::cos(t * 0.15);
-
-                    int bat = std::max(15, 88 - static_cast<int>(t / 25.0));
-                    double batVolt = 15.2 + (bat / 100.0) * 1.6;
-
-                    QString status = (static_cast<int>(t) % 18 == 0) ? "Auto mission in progress" : "";
-
-                    QString currentMode = d->flightMode().isEmpty() ? "AUTO" : d->flightMode();
-                    d->updateSimulatedTelemetry(lat, lon, alt, relAlt, headingDeg,
-                                                roll, pitch, yaw, speed, speed, climbRate,
-                                                bat, batVolt, 16, 0.8, d->isArmed(), currentMode, status);
-                }
+    bool serialFound = false;
+    for (const auto &info : QSerialPortInfo::availablePorts()) {
+        const QString name = info.portName();
+        for (const auto &prefix : k_fcPrefixes) {
+            if (name.startsWith(prefix)) {
+                qDebug() << "DroneManager::autoConnect Serial:" << name << "@" << k_serialBaud;
+                addSerialConnection(name, k_serialBaud);
+                emit autoConnectStatus(true, "Serial",
+                    QString("%1 @ %2 baud").arg(name).arg(k_serialBaud));
+                serialFound = true;
+                break;
             }
-        });
+        }
+        if (serialFound) break;
+    }
+    if (!serialFound)
+        emit autoConnectStatus(false, "Serial", "No ttyACM/ttyUSB device found");
+
+    // ── 2. UDP: open listener on all common MAVLink ports ────────────────────
+    // Standard MAVLink UDP ports used by Mission Planner, QGC, ArduPilot, PX4
+    static const QList<int> k_udpPorts = { 14550, 14551, 14552, 18570 };
+
+    for (int port : k_udpPorts) {
+        qDebug() << "DroneManager::autoConnect UDP: listening on" << port;
+        addUDPConnection("", port);
+        emit autoConnectStatus(true,
+            QString("UDP:%1").arg(port),
+            QString("Listening on :%1").arg(port));
     }
 
-    m_simTimer->start();
-    emit simulationStateChanged();
-    qDebug() << "DroneManager: simulation started with" << droneCount << "drones";
-}
+    // ── 3. TCP: attempt connection to all common SITL / autopilot ports ───────
+    // ArduPilot SITL: 5760/5761/5762, some GCS setups use 14550
+    static const QList<int> k_tcpPorts = { 5760, 5761, 5762, 14550 };
 
-void DroneManager::stopSimulation()
-{
-    if (m_simTimer) {
-        m_simTimer->stop();
-        emit simulationStateChanged();
-        qDebug() << "DroneManager: simulation stopped";
+    for (int port : k_tcpPorts) {
+        qDebug() << "DroneManager::autoConnect TCP: 127.0.0.1:" << port;
+        addTCPConnection("127.0.0.1", port);
+        emit autoConnectStatus(true,
+            QString("TCP:%1").arg(port),
+            QString("127.0.0.1:%1").arg(port));
     }
 }
+
+
 
 void DroneManager::armAll()
 {

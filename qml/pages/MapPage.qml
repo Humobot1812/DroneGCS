@@ -33,11 +33,21 @@ Rectangle {
             if (typeof missionPage !== "undefined" && missionPage.setPolygon) {
                 missionPage.setPolygon(coords);
             }
+            if (drone && drone.geofenceEnabled) {
+                drone.uploadGeofence(coords, drone.geofenceMaxAlt, drone.geofenceMinAlt, drone.geofenceRadius, drone.geofenceAction);
+            }
         }
 
         // Called by JS when a waypoint is moved
         function onWaypointMoved(seq, lat, lon) {
-            console.log("WP moved on map:", seq, lat, lon);
+            if (typeof waypointDrawer !== "undefined" && waypointDrawer.waypoints) {
+                var wps = waypointDrawer.waypoints.slice();
+                if (seq >= 0 && seq < wps.length) {
+                    wps[seq].lat = lat;
+                    wps[seq].lon = lon;
+                    waypointDrawer.setWaypoints(wps);
+                }
+            }
         }
     }
 
@@ -45,6 +55,39 @@ Rectangle {
     Connections {
         target: droneManager
         function onDroneAdded(drone) { connectDroneToMap(drone) }
+    }
+
+    Connections {
+        target: drone ? drone : null
+        function onPositionChanged() {
+            if (drone && drone.homeLat !== 0) {
+                mapView.runJavaScript("setBatteryRthRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.safeReturnRadius + ");");
+                if (drone.geofenceEnabled && drone.circularFenceEnabled) {
+                    mapView.runJavaScript("setGeofenceRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.geofenceRadius + ");");
+                }
+            }
+        }
+        function onBatteryChanged() {
+            if (drone && drone.homeLat !== 0) {
+                mapView.runJavaScript("setBatteryRthRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.safeReturnRadius + ");");
+            }
+        }
+        function onGeofenceChanged() {
+            if (drone && drone.homeLat !== 0 && drone.geofenceEnabled && drone.circularFenceEnabled) {
+                mapView.runJavaScript("setGeofenceRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.geofenceRadius + ");");
+            } else if (!drone || !drone.geofenceEnabled) {
+                mapView.runJavaScript("clearGeofence();");
+            } else if (!drone.circularFenceEnabled) {
+                mapView.runJavaScript("clearGeofenceCircle();");
+            }
+        }
+        function onCircularFenceEnabledChanged() {
+            if (drone && drone.homeLat !== 0 && drone.geofenceEnabled && drone.circularFenceEnabled) {
+                mapView.runJavaScript("setGeofenceRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.geofenceRadius + ");");
+            } else {
+                mapView.runJavaScript("clearGeofenceCircle();");
+            }
+        }
     }
 
     function connectDroneToMap(drone) {
@@ -64,6 +107,49 @@ Rectangle {
         mapView.runJavaScript("setGeofence(" + JSON.stringify(poly) + ")");
     }
 
+    signal requestCloseAiDrawer()
+    property bool isReplayActive: false
+
+    function openFlightLogs() {
+        flightLogDialog.open();
+    }
+
+    function setAiDrawerOpen(isOpen) {
+        if (mapView) {
+            mapView.runJavaScript("if (typeof setAiDrawerOpen === 'function') setAiDrawerOpen(" + (isOpen ? "true" : "false") + ");");
+        }
+        if (isOpen) {
+            geofenceDrawer.visible = false;
+            waypointDrawer.visible = false;
+        }
+    }
+
+    function startFlightReplay(records) {
+        if (!records || records.length === 0) return;
+        isReplayActive = true;
+        geofenceDrawer.visible = false;
+        waypointDrawer.visible = false;
+        root.requestCloseAiDrawer();
+
+        replayBar.loadRecords(records);
+        var coords = [];
+        for (var i = 0; i < records.length; ++i) {
+            var r = records[i];
+            if (r.lat && r.lon && (r.lat !== 0 || r.lon !== 0)) {
+                coords.push({
+                    lat: r.lat,
+                    lon: r.lon,
+                    alt: r.relAlt || 0,
+                    speed: r.groundSpeed || 0,
+                    time: r.timeShort || ""
+                });
+            }
+        }
+        if (mapView) {
+            mapView.runJavaScript("if (typeof setReplayTrack === 'function') setReplayTrack(" + JSON.stringify(coords) + ");");
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -74,7 +160,7 @@ Rectangle {
         Rectangle {
             id: flightHeader
             Layout.fillWidth: true
-            Layout.preferredHeight: 46
+            Layout.preferredHeight: 44
             z: 20
             color: "#161b22"
             border.color: "#21262d"
@@ -88,13 +174,13 @@ Rectangle {
 
                 // Drone color indicator dot
                 Rectangle {
-                    width: 10; height: 10; radius: 5
+                    width: 8; height: 8; radius: 4
                     color: drone ? drone.color : "#00d4ff"
                 }
 
                 // Drone Name & Vehicle Type
                 Column {
-                    spacing: 0
+                    spacing: 1
                     Text {
                         text: drone ? drone.name : "No Drone"
                         color: "#e6edf3"; font.pixelSize: 12; font.bold: true
@@ -106,29 +192,58 @@ Rectangle {
                     }
                 }
 
-                // Vehicle Type Icon (Emoji)
-                Text {
-                    font.pixelSize: 16
-                    text: {
-                        if (!drone || drone.vehicleType === "") return "🔲";
-                        var vt = drone.vehicleType;
-                        if (vt === "Quadrotor")    return "🔲";
-                        if (vt === "Hexarotor")    return "⬡";
-                        if (vt === "Octorotor")    return "⭘";
-                        if (vt === "Tricopter")    return "△";
-                        if (vt === "Fixed Wing")   return "✈";
-                        if (vt === "Helicopter")   return "🚁";
-                        if (vt === "Rover")        return "🚗";
-                        if (vt === "Boat")         return "🚤";
-                        if (vt.startsWith("VTOL")) return "🛩";
-                        return "🔲";
-                    }
-                }
+                Rectangle { width: 1; height: 18; color: "#30363d" }
 
                 Text {
-                    text: "SYS:" + (drone ? drone.sysId : "—")
+                    text: "SYS " + (drone ? drone.sysId : "—")
                     color: "#8b949e"; font.pixelSize: 10
                     font.family: "JetBrains Mono, monospace"
+                }
+
+                Rectangle { width: 1; height: 18; color: "#30363d" }
+
+                // ── Flight Log Console Launcher (Top-Left) ───────────────────
+                Rectangle {
+                    implicitWidth: flightLogBtnRow.implicitWidth + 16
+                    implicitHeight: 28
+                    Layout.preferredHeight: 28
+                    radius: 4
+                    color: flightLogMouse.containsMouse ? "#21262d" : "#0d1117"
+                    border.color: flightLogMouse.containsMouse ? "#00d4ff" : "#30363d"
+                    border.width: 1
+
+                    RowLayout {
+                        id: flightLogBtnRow
+                        anchors.centerIn: parent
+                        spacing: 6
+                        Text { text: "📋"; font.pixelSize: 12 }
+                        Text {
+                            text: "Flight Logs"
+                            font.pixelSize: 11
+                            font.bold: true
+                            color: "#e6edf3"
+                        }
+                        Rectangle {
+                            height: 16; width: flCountTxt.implicitWidth + 8; radius: 8
+                            color: "#00d4ff"
+                            Text {
+                                id: flCountTxt
+                                anchors.centerIn: parent
+                                text: drone ? drone.flightLogCount : 0
+                                font.pixelSize: 9
+                                font.bold: true
+                                color: "#0d1117"
+                            }
+                        }
+                    }
+
+                    MouseArea {
+                        id: flightLogMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: flightLogDialog.open()
+                    }
                 }
 
                 Rectangle { width: 1; height: 22; color: "#30363d" }
@@ -267,67 +382,92 @@ Rectangle {
 
                     // Arm / Disarm Button
                     Button {
-                        text: drone && drone.isArmed ? "⬛ DISARM" : "▲ ARM"
-                        Layout.preferredHeight: 30
-                        font.bold: true; font.pixelSize: 11
+                        text: drone && drone.isArmed ? "DISARM" : "ARM"
+                        Layout.preferredHeight: 32
+                        font.bold: true
+                        font.pixelSize: 11
                         Material.background: drone && drone.isArmed ? "#3d1b1b" : "#1b3d1b"
                         contentItem: Text {
                             text: parent.text
                             color: drone && drone.isArmed ? "#f85149" : "#3fb950"
-                            font: parent.font; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            font: parent.font
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
                         onClicked: {
                             if (drone) {
-                                if (drone.isArmed) drone.disarm();
-                                else drone.arm();
+                                if (drone.isArmed) disarmDialog.open();
+                                else preflightChecklistDialog.open();
                             }
                         }
                     }
 
                     // Takeoff Button
                     Button {
-                        text: "🛫 TAKEOFF"
-                        Layout.preferredHeight: 30
-                        font.bold: true; font.pixelSize: 11
+                        text: "TAKEOFF"
+                        Layout.preferredHeight: 32
+                        font.bold: true
+                        font.pixelSize: 11
                         Material.background: "#21262d"
                         contentItem: Text {
-                            text: parent.text; color: "#00d4ff"; font: parent.font; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            text: parent.text
+                            color: "#00d4ff"
+                            font: parent.font
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
                         onClicked: takeoffPopup.open()
                     }
 
                     // Land Button
                     Button {
-                        text: "🛬 LAND"
-                        Layout.preferredHeight: 30
-                        font.bold: true; font.pixelSize: 11
+                        text: "LAND"
+                        Layout.preferredHeight: 32
+                        font.bold: true
+                        font.pixelSize: 11
                         Material.background: "#21262d"
                         contentItem: Text {
-                            text: parent.text; color: "#d29922"; font: parent.font; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            text: parent.text
+                            color: "#d29922"
+                            font: parent.font
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
-                        onClicked: if (drone) drone.land()
+                        onClicked: landDialog.open()
                     }
 
                     // RTL Button
                     Button {
-                        text: "🏠 RTL"
-                        Layout.preferredHeight: 30
-                        font.bold: true; font.pixelSize: 11
+                        text: "RTL"
+                        Layout.preferredHeight: 32
+                        font.bold: true
+                        font.pixelSize: 11
                         Material.background: "#21262d"
                         contentItem: Text {
-                            text: parent.text; color: "#3fb950"; font: parent.font; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            text: parent.text
+                            color: "#3fb950"
+                            font: parent.font
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
-                        onClicked: if (drone) drone.returnToLaunch()
+                        onClicked: rtlDialog.open()
                     }
 
-                    // Emergency Kill Button
+                    Rectangle { width: 1; height: 20; color: "#30363d" }
+
+                    // Emergency Kill Button (visually separated)
                     Button {
-                        text: "⛔ KILL"
-                        Layout.preferredHeight: 30
-                        font.bold: true; font.pixelSize: 11
-                        Material.background: "#441b1b"
+                        text: "EMERGENCY MOTOR CUT"
+                        Layout.preferredHeight: 32
+                        font.bold: true
+                        font.pixelSize: 10
+                        Material.background: "#351010"
                         contentItem: Text {
-                            text: parent.text; color: "#ff6b6b"; font: parent.font; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            text: parent.text
+                            color: "#ff6b6b"
+                            font: parent.font
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
                         onClicked: emergencyDialog.open()
                     }
@@ -341,27 +481,21 @@ Rectangle {
         Rectangle {
             id: toolbar
             Layout.fillWidth: true
-            Layout.preferredHeight: 40
+            Layout.preferredHeight: 36
             z: 15
             color: "#161b22"
-            border.color: "#21262d"; border.width: 1
+            border.color: "#21262d"
+            border.width: 1
 
             RowLayout {
-                anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
-                spacing: 8
-
-                Text {
-                    text: "🗺 Map Layers"
-                    font.pixelSize: 11
-                    color: "#e6edf3"
-                    font.bold: true
-                }
+                anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                spacing: 6
 
                 // Map Provider ComboBox
                 ComboBox {
                     id: mapProviderCombo
-                    Layout.preferredWidth: 140
-                    Layout.preferredHeight: 28
+                    Layout.preferredWidth: 130
+                    Layout.preferredHeight: 26
                     model: [
                         "Google Hybrid",
                         "Google Satellite",
@@ -382,9 +516,9 @@ Rectangle {
 
                 // Custom Tile / API Configuration Button
                 Button {
-                    text: "⚙ Map API"
-                    Layout.preferredHeight: 28
-                    font.pixelSize: 11
+                    text: "API Keys"
+                    Layout.preferredHeight: 26
+                    font.pixelSize: 10
                     Material.background: "#21262d"
                     contentItem: Text {
                         text: parent.text; color: "#00d4ff"; font: parent.font
@@ -393,20 +527,22 @@ Rectangle {
                     onClicked: apiDialog.open()
                 }
 
-                Rectangle { width: 1; height: 18; color: "#30363d" }
+                Rectangle { width: 1; height: 16; color: "#30363d" }
 
                 // Measure Tool
                 Rectangle {
                     id: measureBtn
-                    width: 88; height: 28; radius: 5
+                    width: 76; height: 26; radius: 4
                     property bool active: root.activeInteractionMode === "measure"
-                    color: active ? "#f59e0b30" : "#21262d"
+                    color: active ? "#f59e0b25" : "#21262d"
                     border.color: active ? "#f59e0b" : "#30363d"; border.width: 1
 
-                    Row {
-                        anchors.centerIn: parent; spacing: 4
-                        Text { text: "📏"; font.pixelSize: 11 }
-                        Text { text: "Measure"; color: measureBtn.active ? "#f59e0b" : "#e6edf3"; font.pixelSize: 11; font.bold: measureBtn.active }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "MEASURE"
+                        color: measureBtn.active ? "#f59e0b" : "#e6edf3"
+                        font.pixelSize: 10
+                        font.bold: measureBtn.active
                     }
 
                     MouseArea {
@@ -418,6 +554,7 @@ Rectangle {
                             } else {
                                 root.activeInteractionMode = "measure";
                                 mapView.runJavaScript("setInteractionMode('measure')");
+                                mapView.forceActiveFocus();
                             }
                         }
                     }
@@ -426,15 +563,17 @@ Rectangle {
                 // Draw Survey Polygon
                 Rectangle {
                     id: drawBtn
-                    width: 105; height: 28; radius: 5
+                    width: 86; height: 26; radius: 4
                     property bool drawActive: false
-                    color: drawActive ? "#3fb95030" : "#21262d"
+                    color: drawActive ? "#3fb95025" : "#21262d"
                     border.color: drawActive ? "#3fb950" : "#30363d"; border.width: 1
 
-                    Row {
-                        anchors.centerIn: parent; spacing: 4
-                        Text { text: "✏"; font.pixelSize: 11 }
-                        Text { text: drawBtn.drawActive ? "Drawing..." : "Survey Area"; color: drawBtn.drawActive ? "#3fb950" : "#e6edf3"; font.pixelSize: 11 }
+                    Text {
+                        anchors.centerIn: parent
+                        text: drawBtn.drawActive ? "DRAWING..." : "SURVEY AREA"
+                        color: drawBtn.drawActive ? "#3fb950" : "#e6edf3"
+                        font.pixelSize: 10
+                        font.bold: drawBtn.drawActive
                     }
 
                     MouseArea {
@@ -442,6 +581,7 @@ Rectangle {
                         onClicked: {
                             drawBtn.drawActive = !drawBtn.drawActive;
                             mapView.runJavaScript(drawBtn.drawActive ? "startDrawPolygon()" : "stopDraw()");
+                            if (drawBtn.drawActive) mapView.forceActiveFocus();
                         }
                     }
                 }
@@ -449,15 +589,17 @@ Rectangle {
                 // Add Manual Waypoint Tool
                 Rectangle {
                     id: addWpBtn
-                    width: 88; height: 28; radius: 5
+                    width: 72; height: 26; radius: 4
                     property bool active: root.activeInteractionMode === "addwp"
-                    color: active ? "#f59e0b30" : "#21262d"
+                    color: active ? "#f59e0b25" : "#21262d"
                     border.color: active ? "#f59e0b" : "#30363d"; border.width: 1
 
-                    Row {
-                        anchors.centerIn: parent; spacing: 4
-                        Text { text: "📍"; font.pixelSize: 11 }
-                        Text { text: "Add WP"; color: addWpBtn.active ? "#f59e0b" : "#e6edf3"; font.pixelSize: 11; font.bold: addWpBtn.active }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "+ WP"
+                        color: addWpBtn.active ? "#f59e0b" : "#e6edf3"
+                        font.pixelSize: 10
+                        font.bold: addWpBtn.active
                     }
 
                     MouseArea {
@@ -469,6 +611,7 @@ Rectangle {
                             } else {
                                 root.activeInteractionMode = "addwp";
                                 mapView.runJavaScript("setInteractionMode('addwp')");
+                                mapView.forceActiveFocus();
                             }
                         }
                     }
@@ -480,7 +623,7 @@ Rectangle {
                     Text { text: "Alt:"; color: "#8b949e"; font.pixelSize: 10; anchors.verticalCenter: parent.verticalCenter }
                     SpinBox {
                         id: wpAltSpin; from: 5; to: 120; value: 15; stepSize: 5
-                        width: 75; height: 26
+                        width: 75; height: 24
                         onValueChanged: mapView.runJavaScript("setManualWpAlt(" + value + ")")
                     }
                     Text { text: "m"; color: "#8b949e"; font.pixelSize: 10; anchors.verticalCenter: parent.verticalCenter }
@@ -489,15 +632,17 @@ Rectangle {
                 // ── Upload Waypoint Mission Button ────────────────────────────
                 Rectangle {
                     id: uploadWpBtn
-                    width: 125; height: 28; radius: 5
+                    width: 110; height: 26; radius: 4
                     color: "#21262d"
                     border.color: "#3fb950"; border.width: 1
                     visible: drone && drone.isConnected
 
-                    Row {
-                        anchors.centerIn: parent; spacing: 4
-                        Text { text: "🚀"; font.pixelSize: 11 }
-                        Text { text: "Upload Mission"; color: "#3fb950"; font.pixelSize: 11; font.bold: true }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "UPLOAD MISSION"
+                        color: "#3fb950"
+                        font.pixelSize: 10
+                        font.bold: true
                     }
 
                     MouseArea {
@@ -527,15 +672,17 @@ Rectangle {
                 // ── Clear Current Uploaded Mission Button ─────────────────────
                 Rectangle {
                     id: clearMissionBtn
-                    width: 115; height: 28; radius: 5
+                    width: 100; height: 26; radius: 4
                     color: "#21262d"
                     border.color: "#f85149"; border.width: 1
                     visible: drone && drone.isConnected
 
-                    Row {
-                        anchors.centerIn: parent; spacing: 4
-                        Text { text: "🗑"; font.pixelSize: 11 }
-                        Text { text: "Clear Mission"; color: "#f85149"; font.pixelSize: 11; font.bold: true }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "CLEAR MISSION"
+                        color: "#f85149"
+                        font.pixelSize: 10
+                        font.bold: true
                     }
 
                     MouseArea {
@@ -545,7 +692,7 @@ Rectangle {
                                 drone.clearMission();
                             }
                             mapView.runJavaScript("clearWaypoints()");
-                            wpUploadStatus.text = "🗑 Mission Cleared!";
+                            wpUploadStatus.text = "Mission Cleared";
                             wpUploadStatus.color = "#f85149";
                             wpUploadStatus.visible = true;
                             wpStatusTimer.restart();
@@ -564,13 +711,120 @@ Rectangle {
                     }
                 }
 
+                // ── Geofence Drawer Button ──
+                Rectangle {
+                    width: 78; height: 26; radius: 4
+                    property bool active: geofenceDrawer.visible
+                    color: active ? "#3fb95025" : "#21262d"
+                    border.color: active ? "#3fb950" : "#30363d"; border.width: 1
+                    Text {
+                        anchors.centerIn: parent
+                        text: "GEOFENCE"
+                        color: parent.active ? "#3fb950" : "#e6edf3"
+                        font.pixelSize: 10
+                        font.bold: parent.active
+                    }
+                    MouseArea {
+                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            geofenceDrawer.visible = !geofenceDrawer.visible;
+                            if (geofenceDrawer.visible) {
+                                waypointDrawer.visible = false;
+                                root.requestCloseAiDrawer();
+                            }
+                        }
+                    }
+                }
+
+                // ── Pre-flight Systems Verification Button ──
+                Rectangle {
+                    width: 82; height: 26; radius: 4
+                    color: "#21262d"; border.color: "#30363d"; border.width: 1
+                    Text {
+                        anchors.centerIn: parent
+                        text: "CHECKLIST"
+                        color: "#e6edf3"
+                        font.pixelSize: 10
+                    }
+                    MouseArea {
+                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: preflightChecklistDialog.open()
+                    }
+                }
+
+                // ── PIP Video Toggle Button ──
+                Rectangle {
+                    width: 74; height: 26; radius: 4
+                    property bool active: pipVideo.visible
+                    color: active ? "#00d4ff25" : "#21262d"
+                    border.color: active ? "#00d4ff" : "#30363d"; border.width: 1
+                    Text {
+                        anchors.centerIn: parent
+                        text: "PIP CAM"
+                        color: parent.active ? "#00d4ff" : "#e6edf3"
+                        font.pixelSize: 10
+                        font.bold: parent.active
+                    }
+                    MouseArea {
+                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: pipVideo.visible = !pipVideo.visible
+                    }
+                }
+
+                // ── Oscilloscope / Telemetry Grapher Button ──
+                Rectangle {
+                    width: 66; height: 26; radius: 4
+                    property bool active: telemetryScope.visible
+                    color: active ? "#c084fc25" : "#21262d"
+                    border.color: active ? "#c084fc" : "#30363d"; border.width: 1
+                    Text {
+                        anchors.centerIn: parent
+                        text: "SCOPE"
+                        color: parent.active ? "#c084fc" : "#e6edf3"
+                        font.pixelSize: 10
+                        font.bold: parent.active
+                    }
+                    MouseArea {
+                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: telemetryScope.visible = !telemetryScope.visible
+                    }
+                }
+
+                // ── Waypoint Mission Table Drawer Button ──
+                Rectangle {
+                    width: 78; height: 26; radius: 4
+                    property bool active: waypointDrawer.visible
+                    color: active ? "#f59e0b25" : "#21262d"
+                    border.color: active ? "#f59e0b" : "#30363d"; border.width: 1
+                    Text {
+                        anchors.centerIn: parent
+                        text: "WP TABLE"
+                        color: parent.active ? "#f59e0b" : "#e6edf3"
+                        font.pixelSize: 10
+                        font.bold: parent.active
+                    }
+                    MouseArea {
+                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            waypointDrawer.visible = !waypointDrawer.visible;
+                            if (waypointDrawer.visible) {
+                                geofenceDrawer.visible = false;
+                                root.requestCloseAiDrawer();
+                                mapView.runJavaScript("getWaypoints()", function(res) {
+                                    if (res) waypointDrawer.setWaypoints(JSON.parse(res));
+                                });
+                            }
+                        }
+                    }
+                }
+
                 Item { Layout.fillWidth: true }
 
                 // Clear Overlays
                 Rectangle {
-                    width: 70; height: 28; radius: 5
+                    width: 60; height: 26; radius: 4
                     color: "#21262d"; border.color: "#30363d"; border.width: 1
-                    Text { text: "🧹 Clear"; color: "#8b949e"; font.pixelSize: 11; anchors.centerIn: parent }
+                    Text { text: "RESET"; color: "#8b949e"; font.pixelSize: 10; anchors.centerIn: parent }
                     MouseArea {
                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                         onClicked: {
@@ -583,12 +837,14 @@ Rectangle {
 
                 // Center / Follow Drone
                 Rectangle {
-                    width: 105; height: 28; radius: 5
+                    width: 96; height: 26; radius: 4
                     color: "#21262d"; border.color: "#00d4ff"; border.width: 1
-                    Row {
-                        anchors.centerIn: parent; spacing: 4
-                        Text { text: "📍"; font.pixelSize: 11 }
-                        Text { text: "Follow Drone"; color: "#00d4ff"; font.pixelSize: 11; font.bold: true }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "LOCATE DRONE"
+                        color: "#00d4ff"
+                        font.pixelSize: 10
+                        font.bold: true
                     }
                     MouseArea {
                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
@@ -619,6 +875,121 @@ Rectangle {
 
                 onJavaScriptConsoleMessage: function(level, message, lineNumber, sourceID) {
                     console.log("[Leaflet Map JS]", message, "line:", lineNumber);
+                }
+            }
+
+            // ── Flashing Geofence Breach Alarm Banner ──
+            Rectangle {
+                id: geofenceAlarmBanner
+                anchors { top: parent.top; left: parent.left; right: parent.right; margins: 10 }
+                height: 42
+                z: 60
+                radius: 6
+                color: "#551a1a"
+                border.color: "#ff6b6b"
+                border.width: 2
+                visible: drone ? drone.geofenceBreached : false
+
+                SequentialAnimation on opacity {
+                    running: geofenceAlarmBanner.visible
+                    loops: Animation.Infinite
+                    NumberAnimation { from: 1.0; to: 0.4; duration: 500 }
+                    NumberAnimation { from: 0.4; to: 1.0; duration: 500 }
+                }
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 16; anchors.rightMargin: 16
+                    spacing: 12
+                    Text {
+                        text: "🚨 WARNING: GEOFENCE BREACH DETECTED! " + (drone ? drone.geofenceBreachReason : "")
+                        font.pixelSize: 12; font.bold: true; color: "#ffffff"
+                        Layout.fillWidth: true; elide: Text.ElideRight
+                    }
+                    Button {
+                        text: "🏠 OVERRIDE: RTL"
+                        font.bold: true; font.pixelSize: 11
+                        Material.background: "#ff6b6b"
+                        Material.foreground: "#ffffff"
+                        onClicked: if (drone) drone.returnToLaunch()
+                    }
+                }
+            }
+
+            // ── Geofence Console Drawer ──
+            GeofenceConsole {
+                id: geofenceDrawer
+                visible: false
+                anchors { top: parent.top; right: parent.right; bottom: parent.bottom; margins: 14 }
+                z: 45
+                onCloseRequested: visible = false
+                onDrawKeepInRequested: mapView.runJavaScript("startDrawPolygon()")
+                onDrawKeepOutRequested: mapView.runJavaScript("startDrawPolygon()")
+                onClearMapFenceRequested: mapView.runJavaScript("clearGeofence()")
+            }
+
+            // ── Waypoint Mission Table Drawer ──
+            WaypointEditorDrawer {
+                id: waypointDrawer
+                visible: false
+                anchors { top: parent.top; right: parent.right; bottom: parent.bottom; margins: 14 }
+                z: 45
+                onCloseRequested: visible = false
+                onWaypointSelected: function(index) {
+                    mapView.runJavaScript("highlightWaypoint(" + index + ")");
+                }
+                onWaypointsModified: function(newWps) {
+                    mapView.runJavaScript("setManualWaypointList(" + JSON.stringify(newWps) + ")");
+                }
+            }
+
+            // ── Floating PIP Video Feed ──
+            PipVideoWidget {
+                id: pipVideo
+                visible: false
+                anchors { right: parent.right; bottom: parent.bottom; margins: 14 }
+                onCloseRequested: visible = false
+                onExpandToFullVideoRequested: {
+                    if (typeof root.parent !== "undefined" && typeof root.parent.currentPage !== "undefined") {
+                        root.parent.currentPage = 3;
+                    }
+                }
+            }
+
+            // ── Real-time Telemetry Oscilloscope ──
+            TelemetryGrapher {
+                id: telemetryScope
+                visible: false
+                anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter; bottomMargin: 14 }
+                z: 45
+                onCloseRequested: visible = false
+            }
+
+            // ── Flight Replay Scrubber Floating Deck ──
+            FlightReplayBar {
+                id: replayBar
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 16
+                anchors.horizontalCenter: parent.horizontalCenter
+                z: 48
+                visible: root.isReplayActive
+
+                onPositionChanged: function(record) {
+                    if (mapView && record) {
+                        var lat = record.lat || 0;
+                        var lon = record.lon || 0;
+                        var hdg = record.heading || 0;
+                        var alt = record.relAlt || 0;
+                        var spd = record.groundSpeed || 0;
+                        mapView.runJavaScript("if (typeof setReplayGhost === 'function') setReplayGhost(" + lat + "," + lon + "," + hdg + "," + alt + "," + spd + ");");
+                    }
+                }
+
+                onCloseRequested: {
+                    root.isReplayActive = false;
+                    if (mapView) {
+                        mapView.runJavaScript("if (typeof clearReplayTrack === 'function') clearReplayTrack();");
+                    }
                 }
             }
 
@@ -857,64 +1228,202 @@ Rectangle {
         }
     }
 
-    // ── Quick Takeoff Altitude Dialog ──
+    // ── Pre-flight Systems Verification Modal ──
+    PreFlightChecklist {
+        id: preflightChecklistDialog
+    }
+
+    // ── Disarm Confirmation Dialog with Slide-To-Confirm ──
     Dialog {
-        id: takeoffPopup
-        title: "Initiate Takeoff"
-        standardButtons: Dialog.Ok | Dialog.Cancel
+        id: disarmDialog
+        title: "Disarm Vehicle Motors"
         anchors.centerIn: parent
+        width: 360
         modal: true
         Material.background: "#161b22"
         Material.foreground: "#e6edf3"
 
         ColumnLayout {
+            width: parent.width
             spacing: 12
             Text {
-                text: "Command " + (drone ? drone.name : "drone") + " to arm and climb to:"
-                color: "#8b949e"; font.pixelSize: 12
+                text: "Confirm command to stop and disarm motors on " + (drone ? drone.name : "drone") + ":"
+                color: "#8b949e"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
+            }
+            SlideToConfirm {
+                Layout.fillWidth: true
+                label: "SLIDE TO DISARM"
+                iconText: "⬛"
+                accentColor: "#f85149"
+                dangerMode: true
+                onConfirmed: {
+                    if (drone) drone.disarm();
+                    disarmDialog.close();
+                }
+            }
+            Button {
+                text: "Cancel"
+                Layout.fillWidth: true
+                Material.background: "#21262d"
+                onClicked: disarmDialog.close()
+            }
+        }
+    }
+
+    // ── Quick Takeoff Altitude Dialog with Slide-To-Confirm ──
+    Dialog {
+        id: takeoffPopup
+        title: "🛫 Takeoff Clearance"
+        anchors.centerIn: parent
+        width: 380
+        modal: true
+        Material.background: "#161b22"
+        Material.foreground: "#e6edf3"
+
+        ColumnLayout {
+            width: parent.width
+            spacing: 14
+            Text {
+                text: "Set target climb altitude and swipe to initiate takeoff:"
+                color: "#8b949e"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
             }
             RowLayout {
                 spacing: 8
+                Text { text: "Altitude AGL:"; color: "#e6edf3"; font.pixelSize: 12 }
                 SpinBox {
                     id: altSpinBox
                     from: 2; to: 120; value: 15; stepSize: 5
                     editable: true
-                    font.pixelSize: 13
+                    font.pixelSize: 12
                     Material.background: "#21262d"
                 }
-                Text { text: "Meters AGL"; color: "#e6edf3"; font.pixelSize: 12 }
+                Text { text: "meters"; color: "#8b949e"; font.pixelSize: 11 }
             }
-        }
-
-        onAccepted: {
-            if (drone) drone.takeoff(altSpinBox.value);
+            SlideToConfirm {
+                Layout.fillWidth: true
+                label: "SLIDE TO TAKEOFF"
+                iconText: "🛫"
+                accentColor: "#00d4ff"
+                onConfirmed: {
+                    if (drone) drone.takeoff(altSpinBox.value);
+                    takeoffPopup.close();
+                }
+            }
+            Button {
+                text: "Cancel"
+                Layout.fillWidth: true
+                Material.background: "#21262d"
+                onClicked: takeoffPopup.close()
+            }
         }
     }
 
-    // ── Emergency Motor Cut Confirmation Dialog ──
+    // ── Land Dialog with Slide-To-Confirm ──
+    Dialog {
+        id: landDialog
+        title: "🛬 Initiate Landing"
+        anchors.centerIn: parent
+        width: 360
+        modal: true
+        Material.background: "#161b22"
+        Material.foreground: "#e6edf3"
+
+        ColumnLayout {
+            width: parent.width
+            spacing: 12
+            Text {
+                text: "Command " + (drone ? drone.name : "vehicle") + " to descend and land at current location:"
+                color: "#8b949e"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
+            }
+            SlideToConfirm {
+                Layout.fillWidth: true
+                label: "SLIDE TO LAND"
+                iconText: "🛬"
+                accentColor: "#d29922"
+                onConfirmed: {
+                    if (drone) drone.land();
+                    landDialog.close();
+                }
+            }
+            Button {
+                text: "Cancel"
+                Layout.fillWidth: true
+                Material.background: "#21262d"
+                onClicked: landDialog.close()
+            }
+        }
+    }
+
+    // ── Return-To-Launch (RTL) Dialog with Slide-To-Confirm ──
+    Dialog {
+        id: rtlDialog
+        title: "🏠 Return To Launch (RTL)"
+        anchors.centerIn: parent
+        width: 360
+        modal: true
+        Material.background: "#161b22"
+        Material.foreground: "#e6edf3"
+
+        ColumnLayout {
+            width: parent.width
+            spacing: 12
+            Text {
+                text: "Command " + (drone ? drone.name : "vehicle") + " to return to home position and land:"
+                color: "#8b949e"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
+            }
+            SlideToConfirm {
+                Layout.fillWidth: true
+                label: "SLIDE TO RETURN HOME"
+                iconText: "🏠"
+                accentColor: "#3fb950"
+                onConfirmed: {
+                    if (drone) drone.returnToLaunch();
+                    rtlDialog.close();
+                }
+            }
+            Button {
+                text: "Cancel"
+                Layout.fillWidth: true
+                Material.background: "#21262d"
+                onClicked: rtlDialog.close()
+            }
+        }
+    }
+
+    // ── Emergency Motor Cut Confirmation Dialog with Slide-To-Confirm ──
     Dialog {
         id: emergencyDialog
-        title: "⚠️ EMERGENCY MOTOR KILL"
-        standardButtons: Dialog.Yes | Dialog.No
+        title: "⚠️ EMERGENCY MOTOR CUTOFF"
         anchors.centerIn: parent
+        width: 380
         modal: true
         Material.background: "#241616"
         Material.foreground: "#ff6b6b"
 
         ColumnLayout {
-            spacing: 10
+            width: parent.width
+            spacing: 12
             Text {
-                text: "DANGER: This commands the flight controller to cut motors immediately!"
-                color: "#ff6b6b"; font.pixelSize: 12; font.bold: true
+                text: "CRITICAL SAFETY WARNING: Motors will cut IMMEDIATELY! If airborne, the aircraft will fall."
+                color: "#ff6b6b"; font.pixelSize: 11; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true
             }
-            Text {
-                text: "If the drone is currently airborne, it will drop instantly. Confirm motor cut?"
-                color: "#e6edf3"; font.pixelSize: 11
+            SlideToConfirm {
+                Layout.fillWidth: true
+                label: "SLIDE FOR MOTOR CUT"
+                iconText: "⛔"
+                accentColor: "#ff6b6b"
+                dangerMode: true
+                onConfirmed: {
+                    if (drone) drone.emergencyKill();
+                    emergencyDialog.close();
+                }
             }
-        }
-
-        onAccepted: {
-            if (drone) drone.emergencyKill();
+            Button {
+                text: "Abort / Cancel"
+                Layout.fillWidth: true
+                Material.background: "#21262d"
+                onClicked: emergencyDialog.close()
+            }
         }
     }
 
@@ -1009,10 +1518,22 @@ Rectangle {
         }
     }
 
+    FlightLogDialog {
+        id: flightLogDialog
+        drone: root.drone
+        onReplayRequested: function(records) {
+            flightLogDialog.close();
+            root.startFlightReplay(records);
+        }
+    }
+
     Component.onCompleted: {
         for (var i = 0; i < droneManager.droneCount; i++) {
             var d = droneManager.droneAt(i);
             if (d) connectDroneToMap(d);
+        }
+        if (typeof initialOpenLogs !== "undefined" && initialOpenLogs) {
+            flightLogDialog.open();
         }
     }
 }

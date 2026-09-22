@@ -45,7 +45,8 @@ static std::vector<double> sweepIntersections(const std::vector<Pt> &poly,
 QVariantList MissionPlanner::generateZigzag(const QVariantList &polygon,
                                               double spacingM,
                                               double homeLat,
-                                              double homeLon)
+                                              double homeLon,
+                                              double altitudeM)
 {
     if (polygon.size() < 3) return {};
 
@@ -85,8 +86,8 @@ QVariantList MissionPlanner::generateZigzag(const QVariantList &polygon,
             if (toggle) std::swap(latA, latB);
 
             QVariantMap wp1, wp2;
-            wp1["lat"] = latA; wp1["lon"] = cur; wp1["seq"] = seq++;
-            wp2["lat"] = latB; wp2["lon"] = cur; wp2["seq"] = seq++;
+            wp1["lat"] = latA; wp1["lon"] = cur; wp1["alt"] = altitudeM; wp1["seq"] = seq++;
+            wp2["lat"] = latB; wp2["lon"] = cur; wp2["alt"] = altitudeM; wp2["seq"] = seq++;
             result.append(wp1);
             result.append(wp2);
             toggle = !toggle;

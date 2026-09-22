@@ -4,5 +4,9 @@ build/
 *.swp
 *.o
 *.a
-*.so
 .DS_Store
+squashfs-root/
+sample_*.wav
+.cache/
+.claude/
+aqtinstall.log

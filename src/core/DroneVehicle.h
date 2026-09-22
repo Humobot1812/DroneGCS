@@ -5,6 +5,7 @@
 #include <QGeoCoordinate>
 #include <QList>
 #include <QVariantList>
+#include <QVariantMap>
 #include <QMap>
 
 /**
@@ -62,6 +63,8 @@ class DroneVehicle : public QObject
     // Mission
     Q_PROPERTY(int   missionCurrent  READ missionCurrent  NOTIFY missionProgressChanged)
     Q_PROPERTY(int   missionTotal    READ missionTotal    NOTIFY missionProgressChanged)
+    Q_PROPERTY(bool  missionUploadActive READ missionUploadActive NOTIFY missionUploadActiveChanged)
+    Q_PROPERTY(double missionUploadProgress READ missionUploadProgress NOTIFY missionUploadProgressChanged)
 
     // Status text
     Q_PROPERTY(QString lastStatusText READ lastStatusText NOTIFY statusTextReceived)
@@ -70,6 +73,23 @@ class DroneVehicle : public QObject
     Q_PROPERTY(double homeLat READ homeLat NOTIFY homePositionChanged)
     Q_PROPERTY(double homeLon READ homeLon NOTIFY homePositionChanged)
     Q_PROPERTY(double homeAlt READ homeAlt NOTIFY homePositionChanged)
+    Q_PROPERTY(double distanceToHome READ distanceToHome NOTIFY distanceToHomeChanged)
+    Q_PROPERTY(double safeReturnRadius READ safeReturnRadius NOTIFY safeReturnRadiusChanged)
+
+    // Geofencing
+    Q_PROPERTY(bool geofenceEnabled READ geofenceEnabled WRITE setGeofenceEnabled NOTIFY geofenceChanged)
+    Q_PROPERTY(bool circularFenceEnabled READ circularFenceEnabled WRITE setCircularFenceEnabled NOTIFY circularFenceEnabledChanged)
+    Q_PROPERTY(int geofenceAction READ geofenceAction WRITE setGeofenceAction NOTIFY geofenceChanged)
+    Q_PROPERTY(double geofenceRadius READ geofenceRadius WRITE setGeofenceRadius NOTIFY geofenceChanged)
+    Q_PROPERTY(double geofenceMinAlt READ geofenceMinAlt WRITE setGeofenceMinAlt NOTIFY geofenceChanged)
+    Q_PROPERTY(double geofenceMaxAlt READ geofenceMaxAlt WRITE setGeofenceMaxAlt NOTIFY geofenceChanged)
+    Q_PROPERTY(bool geofenceBreached READ geofenceBreached NOTIFY geofenceBreachedChanged)
+    Q_PROPERTY(QString geofenceBreachReason READ geofenceBreachReason NOTIFY geofenceBreachedChanged)
+    Q_PROPERTY(QVariantList geofencePolygon READ geofencePolygon WRITE setGeofencePolygon NOTIFY geofencePolygonChanged)
+
+    // Flight Logging & Telemetry Recorder
+    Q_PROPERTY(QVariantList flightLogs READ flightLogs NOTIFY flightLogsChanged)
+    Q_PROPERTY(int flightLogCount READ flightLogCount NOTIFY flightLogsChanged)
 
 public:
     explicit DroneVehicle(quint8 sysId, QObject *parent = nullptr);
@@ -103,10 +123,24 @@ public:
     double    gpsHDOP()         const { return m_gpsHDOP; }
     int       missionCurrent()  const { return m_missionCurrent; }
     int       missionTotal()    const { return m_missionTotal; }
+    bool      missionUploadActive() const { return m_missionUploadActive; }
+    double    missionUploadProgress() const { return m_missionUploadProgress; }
     QString   lastStatusText()  const { return m_lastStatusText; }
     double    homeLat()         const { return m_homeLat; }
     double    homeLon()         const { return m_homeLon; }
     double    homeAlt()         const { return m_homeAlt; }
+    double    distanceToHome()  const { return m_distanceToHome; }
+    double    safeReturnRadius() const { return m_safeReturnRadius; }
+
+    bool      geofenceEnabled() const { return m_geofenceEnabled; }
+    bool      circularFenceEnabled() const { return m_circularFenceEnabled; }
+    int       geofenceAction()  const { return m_geofenceAction; }
+    double    geofenceRadius()  const { return m_geofenceRadius; }
+    double    geofenceMinAlt()  const { return m_geofenceMinAlt; }
+    double    geofenceMaxAlt()  const { return m_geofenceMaxAlt; }
+    bool      geofenceBreached() const { return m_geofenceBreached; }
+    QString   geofenceBreachReason() const { return m_geofenceBreachReason; }
+    QVariantList geofencePolygon() const { return m_geofencePolygon; }
 
     void setName(const QString &n);
     void setColor(const QString &c);
@@ -130,6 +164,28 @@ public:
     Q_INVOKABLE void gotoLocation(double lat, double lon, double alt);
     Q_INVOKABLE void uploadWaypoints(const QVariantList &waypoints);
     Q_INVOKABLE void clearMission();
+
+    // Pre-flight automated checklist
+    Q_INVOKABLE QVariantMap runPreflightCheck();
+
+    // Flight Logging & Export
+    QVariantList flightLogs() const;
+    int flightLogCount() const;
+    Q_INVOKABLE void addFlightLog(const QString &level, const QString &message);
+    Q_INVOKABLE QString exportFlightLogsToCsv(const QString &targetDir = QString());
+    Q_INVOKABLE void clearFlightLogs();
+
+    // Geofencing invokables
+    Q_INVOKABLE void setGeofenceEnabled(bool enabled);
+    Q_INVOKABLE void setCircularFenceEnabled(bool enabled);
+    Q_INVOKABLE void setGeofenceAction(int action);
+    Q_INVOKABLE void setGeofenceRadius(double radius);
+    Q_INVOKABLE void setGeofenceMinAlt(double minAlt);
+    Q_INVOKABLE void setGeofenceMaxAlt(double maxAlt);
+    Q_INVOKABLE void setGeofencePolygon(const QVariantList &polygon);
+    Q_INVOKABLE void uploadGeofence(const QVariantList &polygon, double maxAlt, double minAlt, double radius, int action);
+    Q_INVOKABLE void uploadGeofence(bool enabled, double radius, double minAlt, double maxAlt, int action, const QVariantList &polygon);
+    Q_INVOKABLE void clearGeofence();
 
     // Simulation / Mock telemetry update
     void updateSimulatedTelemetry(double lat, double lon, double alt, double relAlt,
@@ -156,8 +212,20 @@ signals:
     void batteryChanged();
     void gpsChanged();
     void missionProgressChanged();
+    void missionUploadActiveChanged();
+    void missionUploadProgressChanged();
+    void missionUploadComplete(bool success);
+    void missionCleared();
     void statusTextReceived();
     void homePositionChanged();
+    void distanceToHomeChanged();
+    void safeReturnRadiusChanged();
+    void geofenceChanged();
+    void circularFenceEnabledChanged();
+    void geofenceBreachedChanged();
+    void geofenceBreachChanged();
+    void geofencePolygonChanged();
+    void flightLogsChanged();
 
     // Raw bytes to send (connected to link by AbstractLink::write)
     void sendBytes(const QByteArray &bytes);
@@ -172,6 +240,13 @@ private:
     void parseMissionCurrent(const uint8_t *payload, int len);
     void parseStatusText(const uint8_t *payload, int len);
     void parseHomePosition(const uint8_t *payload, int len);
+
+    // MAVLink Mission Protocol helpers
+    void sendMissionCount(int count);
+    void handleMissionRequest(int seq);
+    void checkGeofenceBreach();
+    void updateDistancesAndReturnRadius();
+    void sendMavlinkParam(const char *paramId, float value);
 
     QByteArray buildCommandLong(uint16_t cmd, float p1=0, float p2=0,
                                 float p3=0, float p4=0, float p5=0,
@@ -202,14 +277,55 @@ private:
 
     int m_missionCurrent = 0;
     int m_missionTotal   = 0;
+    bool m_missionUploadActive = false;
+    double m_missionUploadProgress = 0.0;
+    bool m_missionClearPending = false;  // set while awaiting MISSION_ACK from MISSION_CLEAR_ALL
+    QVariantList m_pendingWaypoints;
+    QTimer *m_uploadTimeoutTimer = nullptr;
+    int m_uploadRetryCount = 0;
 
     QString m_lastStatusText;
 
     double  m_homeLat = 0, m_homeLon = 0, m_homeAlt = 0;
+    double  m_distanceToHome = 0.0;
+    double  m_safeReturnRadius = 0.0;
+
+    // Geofencing state
+    bool    m_geofenceEnabled = false;
+    bool    m_circularFenceEnabled = false;
+    int     m_geofenceAction = 1; // 0=Warn, 1=RTL, 2=Land, 3=Loiter
+    double  m_geofenceRadius = 300.0;
+    double  m_geofenceMinAlt = 2.0;
+    double  m_geofenceMaxAlt = 120.0;
+    bool    m_geofenceBreached = false;
+    QString m_geofenceBreachReason;
+    QVariantList m_geofencePolygon;
 
     // heartbeat timing
     QTimer *m_heartbeatTimer = nullptr;
     qint64  m_lastHeartbeat  = 0;
+    qint64  m_lastPacketTime = 0;
+
+    // Flight Log Records
+    struct FlightLogRecord {
+        QString timestamp;
+        qint64 epochMs = 0;
+        QString level;
+        QString message;
+        double lat = 0.0;
+        double lon = 0.0;
+        double alt = 0.0;
+        double speed = 0.0;
+        double heading = 0.0;
+        int battery = 0;
+        double voltage = 0.0;
+        int sats = 0;
+        double hdop = 0.0;
+        QString flightMode;
+        bool armed = false;
+    };
+    QVector<FlightLogRecord> m_flightLogs;
+    qint64 m_lastPeriodicLogTime = 0;
 
     static constexpr quint8 k_gcsSystemId = 255;
     static constexpr quint8 k_gcsCompId   = 190;
