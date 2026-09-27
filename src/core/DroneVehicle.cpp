@@ -193,7 +193,14 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
                 }
                 if (mode != m_flightMode) { m_flightMode = mode; emit flightModeChanged(); }
 
-                if (!wasConnected) emit connectionChanged();
+                if (!wasConnected) {
+                    emit connectionChanged();
+                    // Automatically sync parameters and pre-existing geofence from drone upon connection
+                    QTimer::singleShot(600, this, [this]() {
+                        requestAllParameters();
+                        fetchGeofenceFromDrone();
+                    });
+                }
                 emit heartbeatReceived();
                 break;
             }
@@ -257,29 +264,328 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
                 emit missionProgressChanged();
                 break;
             }
+            case MAVLINK_MSG_ID_PARAM_VALUE: {
+                mavlink_param_value_t pv;
+                mavlink_msg_param_value_decode(&msg, &pv);
+
+                char nameBuf[17] = {0};
+                strncpy(nameBuf, pv.param_id, 16);
+                QString pName = QString::fromLatin1(nameBuf).trimmed();
+                float pVal = pv.param_value;
+
+                m_paramValues[pName] = pVal;
+                m_parameters[pName] = pVal;
+
+                // Detect RTL speed
+                if (pName == "MPC_XY_CRUISE") {
+                    m_rtlSpeed = pVal;
+                    emit vehicleParamsChanged();
+                } else if (pName == "RTL_SPEED" || pName == "WPNAV_SPEED") {
+                    if (pVal > 0.0f) {
+                        m_rtlSpeed = pVal / 100.0; // cm/s to m/s
+                        emit vehicleParamsChanged();
+                    }
+                }
+
+                // Detect Yaw rate
+                if (pName == "MPC_YAWRAUTO_MAX" || pName == "WPNAV_YAW_RATE") {
+                    m_yawRate = pVal;
+                    emit vehicleParamsChanged();
+                }
+
+                // Detect Auto-Yaw
+                if (pName == "MPC_YAW_MODE") {
+                    m_autoYawEnabled = (std::abs(pVal - 4.0f) > 0.1f); // 0=towards WP (ON), 4=fixed (OFF)
+                    emit vehicleParamsChanged();
+                } else if (pName == "WP_YAW_BEHAVIOR") {
+                    m_autoYawEnabled = (pVal > 0.5f);
+                    emit vehicleParamsChanged();
+                }
+
+                // Detect Geofence params from drone (pre-existing fence)
+                if (pName == "FENCE_ENABLE") {
+                    m_geofenceEnabled = (pVal > 0.5f);
+                    emit geofenceChanged();
+                } else if (pName == "GF_ACTION") {
+                    m_geofenceEnabled = (pVal > 0.5f);
+                    emit geofenceChanged();
+                } else if (pName == "FENCE_RADIUS" || pName == "GF_MAX_HOR_DIST") {
+                    if (pVal > 0.0f) {
+                        m_geofenceRadius = pVal;
+                        m_circularFenceEnabled = true;
+                        emit geofenceChanged();
+                        emit circularFenceEnabledChanged();
+                    }
+                } else if (pName == "FENCE_ALT_MAX" || pName == "GF_MAX_VER_DIST") {
+                    if (pVal > 0.0f) {
+                        m_geofenceMaxAlt = pVal;
+                        emit geofenceChanged();
+                    }
+                } else if (pName == "FENCE_ALT_MIN") {
+                    m_geofenceMinAlt = pVal;
+                    emit geofenceChanged();
+                } else if (pName == "FENCE_ACTION") {
+                    m_geofenceAction = static_cast<int>(pVal);
+                    emit geofenceChanged();
+                }
+
+                m_paramBatchCount++;
+                if (m_paramBatchCount % 20 == 0 || (pv.param_count > 0 && pv.param_index >= pv.param_count - 1)) {
+                    emit parametersChanged();
+                }
+                break;
+            }
             case MAVLINK_MSG_ID_MISSION_COUNT: {
                 mavlink_mission_count_t mc;
                 mavlink_msg_mission_count_decode(&msg, &mc);
-                m_missionTotal = mc.count;
-                emit missionProgressChanged();
+
+                if (mc.mission_type == MAV_MISSION_TYPE_FENCE) {
+                    m_fenceTotal = mc.count;
+                    m_incomingFencePolygon.clear();
+                    qDebug() << "[Drone" << m_sysId << "] Vehicle reported" << mc.count << "onboard fence items";
+                    if (mc.count == 0) {
+                        m_fetchingFence = false;
+                    } else {
+                        // Request first fence item
+                        mavlink_message_t reqMsg;
+                        uint8_t reqBuf[MAVLINK_MAX_PACKET_LEN];
+                        mavlink_msg_mission_request_int_pack(
+                            k_gcsSystemId, k_gcsCompId, &reqMsg,
+                            m_sysId, MAV_COMP_ID_AUTOPILOT1,
+                            0, MAV_MISSION_TYPE_FENCE);
+                        int reqLen = mavlink_msg_to_send_buffer(reqBuf, &reqMsg);
+                        emit sendBytes(QByteArray(reinterpret_cast<char*>(reqBuf), reqLen));
+                    }
+                } else {
+                    m_missionTotal = mc.count;
+                    emit missionProgressChanged();
+                    if (m_fetchingMission) {
+                        m_missionDownloadTotal = mc.count;
+                        m_downloadedWaypoints.clear();
+                        if (mc.count == 0) {
+                            m_fetchingMission = false;
+                        } else {
+                            // Request first waypoint
+                            mavlink_message_t reqMsg;
+                            uint8_t reqBuf[MAVLINK_MAX_PACKET_LEN];
+                            mavlink_msg_mission_request_int_pack(
+                                k_gcsSystemId, k_gcsCompId, &reqMsg,
+                                m_sysId, MAV_COMP_ID_AUTOPILOT1,
+                                0, MAV_MISSION_TYPE_MISSION);
+                            int reqLen = mavlink_msg_to_send_buffer(reqBuf, &reqMsg);
+                            emit sendBytes(QByteArray(reinterpret_cast<char*>(reqBuf), reqLen));
+                        }
+                    }
+                }
                 break;
             }
             case MAVLINK_MSG_ID_MISSION_REQUEST_INT: {
                 mavlink_mission_request_int_t req;
                 mavlink_msg_mission_request_int_decode(&msg, &req);
-                handleMissionRequest(req.seq);
+                handleMissionRequest(req.seq, req.mission_type);
                 break;
             }
             case MAVLINK_MSG_ID_MISSION_REQUEST: {
                 mavlink_mission_request_t req;
                 mavlink_msg_mission_request_decode(&msg, &req);
-                handleMissionRequest(req.seq);
+                handleMissionRequest(req.seq, req.mission_type);
+                break;
+            }
+            case MAVLINK_MSG_ID_MISSION_ITEM_INT: {
+                mavlink_mission_item_int_t it;
+                mavlink_msg_mission_item_int_decode(&msg, &it);
+
+                if (it.mission_type == MAV_MISSION_TYPE_FENCE) {
+                    if (m_fetchingFence) {
+                        double lat = it.x / 1e7;
+                        double lon = it.y / 1e7;
+                        if (std::abs(lat) > 0.0001 && std::abs(lon) > 0.0001) {
+                            QVariantMap pt;
+                            pt["lat"] = lat;
+                            pt["lon"] = lon;
+                            m_incomingFencePolygon.append(pt);
+                        }
+
+                        int nextSeq = it.seq + 1;
+                        if (nextSeq < m_fenceTotal) {
+                            mavlink_message_t reqMsg;
+                            uint8_t reqBuf[MAVLINK_MAX_PACKET_LEN];
+                            mavlink_msg_mission_request_int_pack(
+                                k_gcsSystemId, k_gcsCompId, &reqMsg,
+                                m_sysId, MAV_COMP_ID_AUTOPILOT1,
+                                static_cast<uint16_t>(nextSeq), MAV_MISSION_TYPE_FENCE);
+                            int reqLen = mavlink_msg_to_send_buffer(reqBuf, &reqMsg);
+                            emit sendBytes(QByteArray(reinterpret_cast<char*>(reqBuf), reqLen));
+                        } else {
+                            m_fetchingFence = false;
+                            mavlink_message_t ackMsg;
+                            uint8_t ackBuf[MAVLINK_MAX_PACKET_LEN];
+                            mavlink_msg_mission_ack_pack(
+                                k_gcsSystemId, k_gcsCompId, &ackMsg,
+                                m_sysId, MAV_COMP_ID_AUTOPILOT1,
+                                MAV_MISSION_ACCEPTED, MAV_MISSION_TYPE_FENCE, 0);
+                            int ackLen = mavlink_msg_to_send_buffer(ackBuf, &ackMsg);
+                            emit sendBytes(QByteArray(reinterpret_cast<char*>(ackBuf), ackLen));
+
+                            if (!m_incomingFencePolygon.isEmpty()) {
+                                m_geofencePolygon = m_incomingFencePolygon;
+                                m_geofenceEnabled = true;
+                                emit geofencePolygonChanged();
+                                emit geofenceChanged();
+                                m_lastStatusText = QString("[%1] Pre-existing Geofence fetched (%2 points)")
+                                                       .arg(m_name).arg(m_geofencePolygon.size());
+                                addFlightLog("INFO", QString("Fetched pre-existing geofence with %1 points from drone").arg(m_geofencePolygon.size()));
+                                emit statusTextReceived();
+                            }
+                        }
+                    }
+                } else if (it.mission_type == MAV_MISSION_TYPE_MISSION) {
+                    if (m_fetchingMission) {
+                        if (it.seq > 0) {
+                            QVariantMap wp;
+                            wp["seq"] = it.seq;
+                            wp["lat"] = it.x / 1e7;
+                            wp["lon"] = it.y / 1e7;
+                            wp["alt"] = it.z;
+                            wp["delay"] = it.param1;
+                            m_downloadedWaypoints.append(wp);
+                        }
+
+                        int nextSeq = it.seq + 1;
+                        if (nextSeq < m_missionDownloadTotal) {
+                            mavlink_message_t reqMsg;
+                            uint8_t reqBuf[MAVLINK_MAX_PACKET_LEN];
+                            mavlink_msg_mission_request_int_pack(
+                                k_gcsSystemId, k_gcsCompId, &reqMsg,
+                                m_sysId, MAV_COMP_ID_AUTOPILOT1,
+                                static_cast<uint16_t>(nextSeq), MAV_MISSION_TYPE_MISSION);
+                            int reqLen = mavlink_msg_to_send_buffer(reqBuf, &reqMsg);
+                            emit sendBytes(QByteArray(reinterpret_cast<char*>(reqBuf), reqLen));
+                        } else {
+                            m_fetchingMission = false;
+                            mavlink_message_t ackMsg;
+                            uint8_t ackBuf[MAVLINK_MAX_PACKET_LEN];
+                            mavlink_msg_mission_ack_pack(
+                                k_gcsSystemId, k_gcsCompId, &ackMsg,
+                                m_sysId, MAV_COMP_ID_AUTOPILOT1,
+                                MAV_MISSION_ACCEPTED, MAV_MISSION_TYPE_MISSION, 0);
+                            int ackLen = mavlink_msg_to_send_buffer(ackBuf, &ackMsg);
+                            emit sendBytes(QByteArray(reinterpret_cast<char*>(ackBuf), ackLen));
+
+                            emit missionDownloaded(m_downloadedWaypoints);
+                            m_lastStatusText = QString("[%1] Mission downloaded (%2 waypoints)")
+                                                   .arg(m_name).arg(m_downloadedWaypoints.size());
+                            addFlightLog("INFO", QString("Mission downloaded: %1 waypoints received").arg(m_downloadedWaypoints.size()));
+                            emit statusTextReceived();
+                        }
+                    }
+                }
+                break;
+            }
+            case MAVLINK_MSG_ID_MISSION_ITEM: {
+                mavlink_mission_item_t it;
+                mavlink_msg_mission_item_decode(&msg, &it);
+
+                if (it.mission_type == MAV_MISSION_TYPE_FENCE) {
+                    if (m_fetchingFence) {
+                        double lat = it.x;
+                        double lon = it.y;
+                        if (std::abs(lat) > 0.0001 && std::abs(lon) > 0.0001) {
+                            QVariantMap pt;
+                            pt["lat"] = lat;
+                            pt["lon"] = lon;
+                            m_incomingFencePolygon.append(pt);
+                        }
+
+                        int nextSeq = it.seq + 1;
+                        if (nextSeq < m_fenceTotal) {
+                            mavlink_message_t reqMsg;
+                            uint8_t reqBuf[MAVLINK_MAX_PACKET_LEN];
+                            mavlink_msg_mission_request_int_pack(
+                                k_gcsSystemId, k_gcsCompId, &reqMsg,
+                                m_sysId, MAV_COMP_ID_AUTOPILOT1,
+                                static_cast<uint16_t>(nextSeq), MAV_MISSION_TYPE_FENCE);
+                            int reqLen = mavlink_msg_to_send_buffer(reqBuf, &reqMsg);
+                            emit sendBytes(QByteArray(reinterpret_cast<char*>(reqBuf), reqLen));
+                        } else {
+                            m_fetchingFence = false;
+                            mavlink_message_t ackMsg;
+                            uint8_t ackBuf[MAVLINK_MAX_PACKET_LEN];
+                            mavlink_msg_mission_ack_pack(
+                                k_gcsSystemId, k_gcsCompId, &ackMsg,
+                                m_sysId, MAV_COMP_ID_AUTOPILOT1,
+                                MAV_MISSION_ACCEPTED, MAV_MISSION_TYPE_FENCE, 0);
+                            int ackLen = mavlink_msg_to_send_buffer(ackBuf, &ackMsg);
+                            emit sendBytes(QByteArray(reinterpret_cast<char*>(ackBuf), ackLen));
+
+                            if (!m_incomingFencePolygon.isEmpty()) {
+                                m_geofencePolygon = m_incomingFencePolygon;
+                                m_geofenceEnabled = true;
+                                emit geofencePolygonChanged();
+                                emit geofenceChanged();
+                                m_lastStatusText = QString("[%1] Pre-existing Geofence fetched (%2 points)")
+                                                       .arg(m_name).arg(m_geofencePolygon.size());
+                                addFlightLog("INFO", QString("Fetched pre-existing geofence with %1 points from drone").arg(m_geofencePolygon.size()));
+                                emit statusTextReceived();
+                            }
+                        }
+                    }
+                } else if (it.mission_type == MAV_MISSION_TYPE_MISSION) {
+                    if (m_fetchingMission) {
+                        if (it.seq > 0) {
+                            QVariantMap wp;
+                            wp["seq"] = it.seq;
+                            wp["lat"] = static_cast<double>(it.x);
+                            wp["lon"] = static_cast<double>(it.y);
+                            wp["alt"] = it.z;
+                            wp["delay"] = it.param1;
+                            m_downloadedWaypoints.append(wp);
+                        }
+
+                        int nextSeq = it.seq + 1;
+                        if (nextSeq < m_missionDownloadTotal) {
+                            mavlink_message_t reqMsg;
+                            uint8_t reqBuf[MAVLINK_MAX_PACKET_LEN];
+                            mavlink_msg_mission_request_int_pack(
+                                k_gcsSystemId, k_gcsCompId, &reqMsg,
+                                m_sysId, MAV_COMP_ID_AUTOPILOT1,
+                                static_cast<uint16_t>(nextSeq), MAV_MISSION_TYPE_MISSION);
+                            int reqLen = mavlink_msg_to_send_buffer(reqBuf, &reqMsg);
+                            emit sendBytes(QByteArray(reinterpret_cast<char*>(reqBuf), reqLen));
+                        } else {
+                            m_fetchingMission = false;
+                            mavlink_message_t ackMsg;
+                            uint8_t ackBuf[MAVLINK_MAX_PACKET_LEN];
+                            mavlink_msg_mission_ack_pack(
+                                k_gcsSystemId, k_gcsCompId, &ackMsg,
+                                m_sysId, MAV_COMP_ID_AUTOPILOT1,
+                                MAV_MISSION_ACCEPTED, MAV_MISSION_TYPE_MISSION, 0);
+                            int ackLen = mavlink_msg_to_send_buffer(ackBuf, &ackMsg);
+                            emit sendBytes(QByteArray(reinterpret_cast<char*>(ackBuf), ackLen));
+
+                            emit missionDownloaded(m_downloadedWaypoints);
+                            m_lastStatusText = QString("[%1] Mission downloaded (%2 waypoints)")
+                                                   .arg(m_name).arg(m_downloadedWaypoints.size());
+                            addFlightLog("INFO", QString("Mission downloaded: %1 waypoints received").arg(m_downloadedWaypoints.size()));
+                            emit statusTextReceived();
+                        }
+                    }
+                }
                 break;
             }
             case MAVLINK_MSG_ID_MISSION_ACK: {
                 mavlink_mission_ack_t ack;
                 mavlink_msg_mission_ack_decode(&msg, &ack);
                 if (m_uploadTimeoutTimer) m_uploadTimeoutTimer->stop();
+
+                if (m_uploadingFence && (ack.mission_type == MAV_MISSION_TYPE_FENCE || ack.type == MAV_MISSION_ACCEPTED)) {
+                    m_uploadingFence = false;
+                    m_lastStatusText = QString("[%1] Geofence polygon upload accepted (%2 vertices)")
+                                           .arg(m_name).arg(m_pendingFencePolygon.size());
+                    addFlightLog("INFO", QString("Onboard geofence polygon upload accepted by autopilot"));
+                    emit statusTextReceived();
+                    break;
+                }
 
                 if (m_missionClearPending) {
                     // This ACK is the response to MISSION_CLEAR_ALL
@@ -725,9 +1031,36 @@ void DroneVehicle::uploadWaypoints(const QVariantList &waypoints)
     m_uploadTimeoutTimer->start();
 }
 
-void DroneVehicle::handleMissionRequest(int seq)
+void DroneVehicle::handleMissionRequest(int seq, uint8_t missionType)
 {
     if (m_uploadTimeoutTimer) m_uploadTimeoutTimer->start(); // reset timeout
+
+    if (missionType == MAV_MISSION_TYPE_FENCE) {
+        if (!m_uploadingFence || seq < 0 || seq >= m_pendingFencePolygon.size()) return;
+
+        QVariantMap pt = m_pendingFencePolygon.at(seq).toMap();
+        double lat = pt.value("lat", 0.0).toDouble();
+        double lon = pt.value("lon", 0.0).toDouble();
+
+        mavlink_message_t fMsg;
+        uint8_t fBuf[MAVLINK_MAX_PACKET_LEN];
+        mavlink_msg_mission_item_int_pack(
+            k_gcsSystemId, k_gcsCompId, &fMsg,
+            m_sysId, MAV_COMP_ID_AUTOPILOT1,
+            static_cast<uint16_t>(seq),
+            MAV_FRAME_GLOBAL,
+            5001 /* MAV_CMD_NAV_FENCE_POLYGON_VERTEX_INCLUSION */,
+            0, 1,
+            static_cast<float>(m_pendingFencePolygon.size()), 0, 0, 0,
+            static_cast<int32_t>(lat * 1e7),
+            static_cast<int32_t>(lon * 1e7),
+            0.0f,
+            MAV_MISSION_TYPE_FENCE);
+        int fLen = mavlink_msg_to_send_buffer(fBuf, &fMsg);
+        emit sendBytes(QByteArray(reinterpret_cast<char*>(fBuf), fLen));
+        return;
+    }
+
     int total = m_pendingWaypoints.size() + 1;
     if (seq < 0 || seq >= total) return;
 
@@ -861,15 +1194,50 @@ void DroneVehicle::uploadGeofence(const QVariantList &polygon, double maxAlt, do
     emit circularFenceEnabledChanged();
     emit geofencePolygonChanged();
 
-    sendMavlinkParam("FENCE_ENABLE", 1.0f);
-    sendMavlinkParam("FENCE_ACTION", static_cast<float>(action));
-    sendMavlinkParam("FENCE_RADIUS", static_cast<float>(radius));
-    sendMavlinkParam("FENCE_ALT_MAX", static_cast<float>(maxAlt));
-    if (minAlt > 0) sendMavlinkParam("FENCE_ALT_MIN", static_cast<float>(minAlt));
+    if (m_autopilotType == "PX4") {
+        // PX4 Onboard Geofence parameters
+        // GF_ACTION: 0=None, 1=Warning, 2=Hold, 3=RTL, 4=Land, 5=Terminate
+        int px4Action = 3; // RTL
+        if (action == 0) px4Action = 1;      // Warning
+        else if (action == 1) px4Action = 3; // RTL
+        else if (action == 2) px4Action = 4; // Land
+        else if (action == 3) px4Action = 2; // Hold
 
-    m_lastStatusText = QString("[%1] Geofence Armed & Synced").arg(m_name);
+        sendMavlinkParam("GF_ACTION", static_cast<float>(px4Action));
+        sendMavlinkParam("GF_MAX_HOR_DIST", static_cast<float>(radius));
+        sendMavlinkParam("GF_MAX_VER_DIST", static_cast<float>(maxAlt));
+        sendMavlinkParam("GF_ALTMODE", 0.0f);
+    } else {
+        // ArduPilot Onboard Geofence parameters
+        sendMavlinkParam("FENCE_ENABLE", 1.0f);
+        sendMavlinkParam("FENCE_ACTION", static_cast<float>(action));
+        sendMavlinkParam("FENCE_RADIUS", static_cast<float>(radius));
+        sendMavlinkParam("FENCE_ALT_MAX", static_cast<float>(maxAlt));
+        if (minAlt > 0) sendMavlinkParam("FENCE_ALT_MIN", static_cast<float>(minAlt));
+        sendMavlinkParam("FENCE_TYPE", (polygon.size() >= 3) ? 7.0f : 3.0f);
+    }
+
+    // If polygon has >= 3 vertices, upload to drone via MAVLink mission fence protocol
+    if (polygon.size() >= 3) {
+        m_uploadingFence = true;
+        m_pendingFencePolygon = polygon;
+
+        mavlink_message_t cMsg;
+        uint8_t cBuf[MAVLINK_MAX_PACKET_LEN];
+        mavlink_msg_mission_count_pack(
+            k_gcsSystemId, k_gcsCompId, &cMsg,
+            m_sysId, MAV_COMP_ID_AUTOPILOT1,
+            static_cast<uint16_t>(polygon.size()),
+            MAV_MISSION_TYPE_FENCE, 0);
+        int cLen = mavlink_msg_to_send_buffer(cBuf, &cMsg);
+        emit sendBytes(QByteArray(reinterpret_cast<char*>(cBuf), cLen));
+    }
+
+    m_lastStatusText = QString("[%1] Geofence Armed & Synced to %2").arg(m_name, m_autopilotType);
+    addFlightLog("INFO", QString("Synced geofence to %1: radius %2m, maxAlt %3m, %4 polygon points")
+                             .arg(m_autopilotType).arg(radius, 0, 'f', 0).arg(maxAlt, 0, 'f', 0).arg(polygon.size()));
     emit statusTextReceived();
-    qDebug() << "[Drone" << m_sysId << "] Geofence synced: maxAlt=" << maxAlt << "radius=" << radius;
+    qDebug() << "[Drone" << m_sysId << "] Geofence synced to" << m_autopilotType << "maxAlt=" << maxAlt << "radius=" << radius;
     checkGeofenceBreach();
 }
 
@@ -893,9 +1261,24 @@ void DroneVehicle::clearGeofence()
     emit geofenceBreachedChanged();
     emit geofenceBreachChanged();
 
-    sendMavlinkParam("FENCE_ENABLE", 0.0f);
+    if (m_autopilotType == "PX4") {
+        sendMavlinkParam("GF_ACTION", 0.0f);
+    } else {
+        sendMavlinkParam("FENCE_ENABLE", 0.0f);
+    }
+
+    // Clear onboard fence mission items
+    mavlink_message_t msg;
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    mavlink_msg_mission_clear_all_pack(
+        k_gcsSystemId, k_gcsCompId, &msg,
+        m_sysId, MAV_COMP_ID_AUTOPILOT1,
+        MAV_MISSION_TYPE_FENCE);
+    int len = mavlink_msg_to_send_buffer(buf, &msg);
+    emit sendBytes(QByteArray(reinterpret_cast<char*>(buf), len));
 
     m_lastStatusText = QString("[%1] Geofence Disarmed & Cleared").arg(m_name);
+    addFlightLog("WARN", "Geofence disarmed and cleared from vehicle");
     emit statusTextReceived();
     qDebug() << "[Drone" << m_sysId << "] Geofence cleared";
 }
@@ -1376,4 +1759,142 @@ QString DroneVehicle::exportFlightLogsToCsv(const QString &targetDir)
     qDebug() << "[DroneVehicle] Exported" << m_flightLogs.size() << "flight log rows to" << fullPath;
     addFlightLog("INFO", QString("Exported %1 log entries to %2").arg(m_flightLogs.size()).arg(fileName));
     return fullPath;
+}
+
+// ─── Vehicle Parameters & Tuning (PX4 + ArduPilot) ────────────────────────────
+
+double DroneVehicle::rtlSpeed() const
+{
+    return m_rtlSpeed;
+}
+
+void DroneVehicle::setRtlSpeed(double speedMs)
+{
+    if (speedMs <= 0.0) return;
+    m_rtlSpeed = speedMs;
+    emit vehicleParamsChanged();
+
+    if (m_autopilotType == "PX4") {
+        sendMavlinkParam("MPC_XY_CRUISE", static_cast<float>(speedMs));
+    } else {
+        float speedCmS = static_cast<float>(speedMs * 100.0);
+        sendMavlinkParam("RTL_SPEED", speedCmS);
+        sendMavlinkParam("WPNAV_SPEED", speedCmS);
+    }
+    m_lastStatusText = QString("[%1] RTL Speed set to %2 m/s").arg(m_name).arg(speedMs, 0, 'f', 1);
+    addFlightLog("INFO", QString("Updated RTL cruising speed to %1 m/s").arg(speedMs, 0, 'f', 1));
+    emit statusTextReceived();
+    qDebug() << "[Drone" << m_sysId << "] RTL Speed set to" << speedMs << "m/s";
+}
+
+double DroneVehicle::yawRate() const
+{
+    return m_yawRate;
+}
+
+void DroneVehicle::setYawRate(double rateDegS)
+{
+    if (rateDegS <= 0.0) return;
+    m_yawRate = rateDegS;
+    emit vehicleParamsChanged();
+
+    if (m_autopilotType == "PX4") {
+        sendMavlinkParam("MPC_YAWRAUTO_MAX", static_cast<float>(rateDegS));
+        sendMavlinkParam("MC_YAWRATE_MAX", static_cast<float>(rateDegS));
+    } else {
+        sendMavlinkParam("WPNAV_YAW_RATE", static_cast<float>(rateDegS));
+    }
+    m_lastStatusText = QString("[%1] Yaw Rate set to %2 deg/s").arg(m_name).arg(rateDegS, 0, 'f', 0);
+    addFlightLog("INFO", QString("Updated autonomous yaw turning rate to %1 deg/s").arg(rateDegS, 0, 'f', 0));
+    emit statusTextReceived();
+    qDebug() << "[Drone" << m_sysId << "] Yaw Rate set to" << rateDegS << "deg/s";
+}
+
+bool DroneVehicle::autoYawEnabled() const
+{
+    return m_autoYawEnabled;
+}
+
+void DroneVehicle::setAutoYawEnabled(bool enabled)
+{
+    m_autoYawEnabled = enabled;
+    emit vehicleParamsChanged();
+
+    if (m_autopilotType == "PX4") {
+        // 0 = Face next waypoint (ON), 4 = Fixed / hold heading (OFF)
+        sendMavlinkParam("MPC_YAW_MODE", enabled ? 0.0f : 4.0f);
+    } else {
+        // 1 = Face next waypoint (ON), 0 = None (OFF)
+        sendMavlinkParam("WP_YAW_BEHAVIOR", enabled ? 1.0f : 0.0f);
+    }
+    m_lastStatusText = QString("[%1] Auto-Yaw: %2").arg(m_name, enabled ? "ON (Face WP)" : "OFF (Fixed)");
+    addFlightLog("INFO", QString("Auto-Yaw waypoint facing set to %1").arg(enabled ? "ENABLED" : "DISABLED"));
+    emit statusTextReceived();
+    qDebug() << "[Drone" << m_sysId << "] Auto-Yaw set to" << (enabled ? "ON" : "OFF");
+}
+
+void DroneVehicle::requestAllParameters()
+{
+    mavlink_message_t msg;
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    mavlink_msg_param_request_list_pack(
+        k_gcsSystemId, k_gcsCompId, &msg,
+        m_sysId, MAV_COMP_ID_AUTOPILOT1);
+    int len = mavlink_msg_to_send_buffer(buf, &msg);
+    emit sendBytes(QByteArray(reinterpret_cast<char*>(buf), len));
+
+    m_paramBatchCount = 0;
+    m_lastStatusText = QString("[%1] Requesting parameters from vehicle...").arg(m_name);
+    emit statusTextReceived();
+    qDebug() << "[Drone" << m_sysId << "] Requested full parameter list from vehicle";
+}
+
+void DroneVehicle::setParam(const QString &paramName, float value)
+{
+    sendMavlinkParam(paramName.toLatin1().constData(), value);
+    m_paramValues[paramName] = value;
+    m_parameters[paramName] = value;
+    emit parametersChanged();
+    m_lastStatusText = QString("[%1] Param %2 set to %3").arg(m_name, paramName).arg(value);
+    emit statusTextReceived();
+}
+
+void DroneVehicle::fetchGeofenceFromDrone()
+{
+    m_fetchingFence = true;
+    m_incomingFencePolygon.clear();
+    m_fenceTotal = 0;
+
+    mavlink_message_t msg;
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    mavlink_msg_mission_request_list_pack(
+        k_gcsSystemId, k_gcsCompId, &msg,
+        m_sysId, MAV_COMP_ID_AUTOPILOT1,
+        MAV_MISSION_TYPE_FENCE);
+    int len = mavlink_msg_to_send_buffer(buf, &msg);
+    emit sendBytes(QByteArray(reinterpret_cast<char*>(buf), len));
+
+    m_lastStatusText = QString("[%1] Fetching pre-existing geofence from drone...").arg(m_name);
+    emit statusTextReceived();
+    qDebug() << "[Drone" << m_sysId << "] Requested onboard geofence from drone (MAV_MISSION_TYPE_FENCE)";
+}
+
+void DroneVehicle::downloadMission()
+{
+    m_fetchingMission = true;
+    m_downloadedWaypoints.clear();
+    m_missionDownloadTotal = 0;
+
+    mavlink_message_t msg;
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    mavlink_msg_mission_request_list_pack(
+        k_gcsSystemId, k_gcsCompId, &msg,
+        m_sysId, MAV_COMP_ID_AUTOPILOT1,
+        MAV_MISSION_TYPE_MISSION);
+    int len = mavlink_msg_to_send_buffer(buf, &msg);
+    emit sendBytes(QByteArray(reinterpret_cast<char*>(buf), len));
+
+    m_lastStatusText = QString("[%1] Downloading mission from drone...").arg(m_name);
+    emit statusTextReceived();
+    qDebug() << "[Drone" << m_sysId << "] Requested onboard mission list from drone";
 }

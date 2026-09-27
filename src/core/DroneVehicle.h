@@ -92,6 +92,13 @@ class DroneVehicle : public QObject
     Q_PROPERTY(QVariantList flightLogs READ flightLogs NOTIFY flightLogsChanged)
     Q_PROPERTY(int flightLogCount READ flightLogCount NOTIFY flightLogsChanged)
 
+    // Vehicle Parameters & Quick Tuning (ArduPilot + PX4 unified)
+    Q_PROPERTY(double rtlSpeed READ rtlSpeed WRITE setRtlSpeed NOTIFY vehicleParamsChanged)
+    Q_PROPERTY(double yawRate READ yawRate WRITE setYawRate NOTIFY vehicleParamsChanged)
+    Q_PROPERTY(bool autoYawEnabled READ autoYawEnabled WRITE setAutoYawEnabled NOTIFY vehicleParamsChanged)
+    Q_PROPERTY(QVariantMap parameters READ parameters NOTIFY parametersChanged)
+    Q_PROPERTY(int parameterCount READ parameterCount NOTIFY parametersChanged)
+
 public:
     explicit DroneVehicle(quint8 sysId, QObject *parent = nullptr);
 
@@ -189,6 +196,21 @@ public:
     Q_INVOKABLE void uploadGeofence(bool enabled, double radius, double minAlt, double maxAlt, int action, const QVariantList &polygon);
     Q_INVOKABLE void clearGeofence();
 
+    // Parameter & Geofence Fetch Invokables
+    double rtlSpeed() const;
+    void setRtlSpeed(double speedMs);
+    double yawRate() const;
+    void setYawRate(double rateDegS);
+    bool autoYawEnabled() const;
+    void setAutoYawEnabled(bool enabled);
+    QVariantMap parameters() const { return m_parameters; }
+    int parameterCount() const { return m_parameters.size(); }
+
+    Q_INVOKABLE void requestAllParameters();
+    Q_INVOKABLE void setParam(const QString &paramName, float value);
+    Q_INVOKABLE void fetchGeofenceFromDrone();
+    Q_INVOKABLE void downloadMission();
+
     // Simulation / Mock telemetry update
     void updateSimulatedTelemetry(double lat, double lon, double alt, double relAlt,
                                   double heading, double roll, double pitch, double yaw,
@@ -198,6 +220,9 @@ public:
                                   bool armed, const QString &mode, const QString &statusText);
 
 signals:
+    void vehicleParamsChanged();
+    void parametersChanged();
+    void missionDownloaded(const QVariantList &waypoints);
     void nameChanged();
     void colorChanged();
     void connectionChanged();
@@ -245,7 +270,7 @@ private:
 
     // MAVLink Mission Protocol helpers
     void sendMissionCount(int count);
-    void handleMissionRequest(int seq);
+    void handleMissionRequest(int seq, uint8_t missionType = 0);
     void checkGeofenceBreach();
     void updateDistancesAndReturnRadius();
     void sendMavlinkParam(const char *paramId, float value);
@@ -328,6 +353,26 @@ private:
     };
     QVector<FlightLogRecord> m_flightLogs;
     qint64 m_lastPeriodicLogTime = 0;
+
+    // Vehicle Parameters (ArduPilot + PX4)
+    QVariantMap m_parameters;
+    QMap<QString, float> m_paramValues;
+    int m_paramBatchCount = 0;
+
+    // Fence & Mission Download Protocol
+    bool m_fetchingFence = false;
+    int m_fenceTotal = 0;
+    QVariantList m_incomingFencePolygon;
+    bool m_fetchingMission = false;
+    int m_missionDownloadTotal = 0;
+    QVariantList m_downloadedWaypoints;
+    bool m_uploadingFence = false;
+    QVariantList m_pendingFencePolygon;
+
+    // Quick Flight Tuning values
+    double m_rtlSpeed = 5.0; // m/s
+    double m_yawRate = 45.0; // deg/s
+    bool   m_autoYawEnabled = true;
 
     static constexpr quint8 k_gcsSystemId = 255;
     static constexpr quint8 k_gcsCompId   = 190;

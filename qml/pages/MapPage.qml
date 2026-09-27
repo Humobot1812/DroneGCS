@@ -73,12 +73,22 @@ Rectangle {
             }
         }
         function onGeofenceChanged() {
-            if (drone && drone.homeLat !== 0 && drone.geofenceEnabled && drone.circularFenceEnabled) {
-                mapView.runJavaScript("setGeofenceRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.geofenceRadius + ");");
+            if (drone && drone.geofenceEnabled) {
+                if (drone.geofencePolygon && drone.geofencePolygon.length >= 3) {
+                    mapView.runJavaScript("setGeofence(" + JSON.stringify(drone.geofencePolygon) + ");");
+                }
+                if (drone.circularFenceEnabled && drone.homeLat !== 0) {
+                    mapView.runJavaScript("setGeofenceRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.geofenceRadius + ");");
+                }
             } else if (!drone || !drone.geofenceEnabled) {
                 mapView.runJavaScript("clearGeofence();");
             } else if (!drone.circularFenceEnabled) {
                 mapView.runJavaScript("clearGeofenceCircle();");
+            }
+        }
+        function onGeofencePolygonChanged() {
+            if (drone && drone.geofencePolygon && drone.geofencePolygon.length >= 3) {
+                mapView.runJavaScript("setGeofence(" + JSON.stringify(drone.geofencePolygon) + ");");
             }
         }
         function onCircularFenceEnabledChanged() {
@@ -87,6 +97,12 @@ Rectangle {
             } else {
                 mapView.runJavaScript("clearGeofenceCircle();");
             }
+        }
+        function onMissionDownloaded(waypoints) {
+            if (typeof waypointDrawer !== "undefined" && waypointDrawer && waypointDrawer.setWaypoints) {
+                waypointDrawer.setWaypoints(waypoints);
+            }
+            setWaypoints(waypoints);
         }
     }
 

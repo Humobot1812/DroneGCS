@@ -203,6 +203,20 @@ Rectangle {
 
         Item { Layout.fillHeight: true }
 
+        Button {
+            text: "📥 Fetch Geofence from Drone"
+            Layout.fillWidth: true
+            Layout.preferredHeight: 32
+            font.pixelSize: 11
+            font.bold: true
+            Material.background: "#21262d"
+            Material.foreground: "#58a6ff"
+            enabled: drone && drone.isConnected
+            onClicked: {
+                if (drone) drone.fetchGeofenceFromDrone();
+            }
+        }
+
         // Action Buttons: Sync and Clear
         RowLayout {
             Layout.fillWidth: true

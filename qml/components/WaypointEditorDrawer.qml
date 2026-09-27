@@ -214,6 +214,19 @@ Rectangle {
             }
 
             Button {
+                text: "📥 Download"
+                Layout.preferredWidth: 88
+                Layout.preferredHeight: 30
+                font.pixelSize: 10
+                Material.background: "#21262d"
+                Material.foreground: "#58a6ff"
+                enabled: drone && drone.isConnected
+                onClicked: {
+                    if (drone) drone.downloadMission();
+                }
+            }
+
+            Button {
                 text: "🚀 Upload Mission"
                 Layout.fillWidth: true
                 Layout.preferredHeight: 30
