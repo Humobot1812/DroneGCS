@@ -294,9 +294,9 @@ Rectangle {
                         id: modeSelector
                         width: 135
                         height: 32
-                        model: ["GUIDED", "AUTO", "LOITER", "STABILIZE", "ALT_HOLD", "RTL", "LAND", "BRAKE", "POSHOLD"]
+                        model: (drone && drone.availableFlightModes && drone.availableFlightModes.length > 0) ? drone.availableFlightModes : ["GUIDED", "AUTO", "LOITER", "STABILIZE", "ALT_HOLD", "RTL", "LAND", "BRAKE", "POSHOLD"]
                         currentIndex: {
-                            if (!drone) return 0;
+                            if (!drone || !model) return 0;
                             var idx = model.indexOf(drone.flightMode);
                             return idx >= 0 ? idx : 0;
                         }

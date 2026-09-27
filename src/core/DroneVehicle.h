@@ -33,6 +33,7 @@ class DroneVehicle : public QObject
     // Autopilot & vehicle identification (populated from heartbeat)
     Q_PROPERTY(QString autopilotType READ autopilotType NOTIFY autopilotTypeChanged)
     Q_PROPERTY(QString vehicleType   READ vehicleType   NOTIFY vehicleTypeChanged)
+    Q_PROPERTY(QStringList availableFlightModes READ availableFlightModes NOTIFY autopilotTypeChanged)
 
     // Position
     Q_PROPERTY(double latitude     READ latitude       NOTIFY positionChanged)
@@ -152,6 +153,7 @@ public:
     void processPacket(const QByteArray &rawPacket);
 
     // QML invokable commands
+    Q_INVOKABLE QStringList availableFlightModes() const;
     Q_INVOKABLE void arm();
     Q_INVOKABLE void disarm();
     Q_INVOKABLE void setFlightMode(const QString &mode);

@@ -341,6 +341,44 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
                 emit statusTextReceived();
                 break;
             }
+            case MAVLINK_MSG_ID_COMMAND_ACK: {
+                mavlink_command_ack_t ack;
+                mavlink_msg_command_ack_decode(&msg, &ack);
+                QString cmdName;
+                if (ack.command == MAV_CMD_NAV_TAKEOFF) cmdName = "TAKEOFF";
+                else if (ack.command == MAV_CMD_COMPONENT_ARM_DISARM) cmdName = "ARM/DISARM";
+                else if (ack.command == MAV_CMD_DO_SET_MODE) cmdName = "SET_MODE";
+                else if (ack.command == MAV_CMD_NAV_RETURN_TO_LAUNCH) cmdName = "RTL";
+                else if (ack.command == MAV_CMD_NAV_LAND) cmdName = "LAND";
+                else cmdName = QString("CMD:%1").arg(ack.command);
+
+                QString resultStr;
+                switch (ack.result) {
+                    case MAV_RESULT_ACCEPTED:             resultStr = "ACCEPTED"; break;
+                    case MAV_RESULT_TEMPORARILY_REJECTED: resultStr = "TEMPORARILY REJECTED"; break;
+                    case MAV_RESULT_DENIED:               resultStr = "DENIED"; break;
+                    case MAV_RESULT_UNSUPPORTED:          resultStr = "UNSUPPORTED"; break;
+                    case MAV_RESULT_FAILED:               resultStr = "FAILED"; break;
+                    case MAV_RESULT_IN_PROGRESS:          resultStr = "IN PROGRESS"; break;
+                    case MAV_RESULT_CANCELLED:            resultStr = "CANCELLED"; break;
+                    default:                              resultStr = QString("RESULT:%1").arg(ack.result); break;
+                }
+
+                qDebug() << "[Drone" << m_sysId << "] COMMAND_ACK:" << cmdName << "→" << resultStr;
+
+                if (ack.result != MAV_RESULT_ACCEPTED && ack.result != MAV_RESULT_IN_PROGRESS) {
+                    m_lastStatusText = QString("⚠️ [%1] %2: %3").arg(m_name, cmdName, resultStr);
+                    addFlightLog("WARN", QString("Autopilot command %1 was %2").arg(cmdName, resultStr));
+                    emit statusTextReceived();
+                } else if (ack.command == MAV_CMD_NAV_TAKEOFF && ack.result == MAV_RESULT_ACCEPTED) {
+                    m_flightMode = "TAKEOFF";
+                    m_lastStatusText = QString("[%1] Takeoff accepted by autopilot").arg(m_name);
+                    addFlightLog("NAV", "Takeoff command accepted by autopilot");
+                    emit flightModeChanged();
+                    emit statusTextReceived();
+                }
+                break;
+            }
             case MAVLINK_MSG_ID_HOME_POSITION: {
                 mavlink_home_position_t hp;
                 mavlink_msg_home_position_decode(&msg, &hp);
@@ -416,37 +454,95 @@ void DroneVehicle::disarm()
 
 void DroneVehicle::takeoff(double altitudeM)
 {
-    // Step 1 – switch to GUIDED
-    {
-        mavlink_message_t msg;
-        uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-        mavlink_msg_set_mode_pack(
-            k_gcsSystemId, k_gcsCompId, &msg,
-            m_sysId,
-            MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
-            4 /* GUIDED */);
-        int len = mavlink_msg_to_send_buffer(buf, &msg);
-        emit sendBytes(QByteArray(reinterpret_cast<char*>(buf), len));
+    if (m_autopilotType == "PX4") {
+        // Disengage PX4 safety switch state if engaged
+        emit sendBytes(buildCommandLong(5300 /* MAV_CMD_DO_SET_SAFETY_SWITCH_STATE */, 0.0f));
+
+        // Arm the motors if not yet armed
+        if (!m_armed) {
+            emit sendBytes(buildCommandLong(MAV_CMD_COMPONENT_ARM_DISARM, 1.0f));
+            m_armed = true;
+            emit armedChanged();
+        }
+
+        // Set mode to AUTO.TAKEOFF (main 4, sub 2)
+        setFlightMode("TAKEOFF");
+
+        // Target altitude calculation for PX4:
+        // PX4 expects AMSL altitude: vehicleAltitudeAMSL + requestedTakeoffAltAGL
+        float targetAltAMSL = static_cast<float>(altitudeM);
+        if (m_alt > 0.1 || m_alt < -0.1) {
+            targetAltAMSL = static_cast<float>(m_alt + altitudeM);
+        }
+
+        float yaw = std::isnan(m_heading) ? NAN : static_cast<float>(m_heading);
+        float lat = (m_lat != 0.0) ? static_cast<float>(m_lat) : NAN;
+        float lon = (m_lon != 0.0) ? static_cast<float>(m_lon) : NAN;
+
+        // Send MAV_CMD_NAV_TAKEOFF immediately
+        emit sendBytes(buildCommandLong(MAV_CMD_NAV_TAKEOFF,
+                                        0.0f, 0.0f, 0.0f,
+                                        yaw, lat, lon, targetAltAMSL));
+
+        // Arming takes 100-300ms in PX4 for gyro / sensor checks. Resend takeoff command
+        // at 250ms and 600ms to guarantee acceptance without being prematurely aborted into LOITER
+        QTimer::singleShot(250, this, [this, targetAltAMSL, yaw, lat, lon]() {
+            emit sendBytes(buildCommandLong(MAV_CMD_COMPONENT_ARM_DISARM, 1.0f));
+            emit sendBytes(buildCommandLong(MAV_CMD_NAV_TAKEOFF,
+                                            0.0f, 0.0f, 0.0f,
+                                            yaw, lat, lon, targetAltAMSL));
+        });
+
+        QTimer::singleShot(600, this, [this, targetAltAMSL, yaw, lat, lon]() {
+            if (!m_armed) {
+                emit sendBytes(buildCommandLong(MAV_CMD_COMPONENT_ARM_DISARM, 1.0f));
+            }
+            emit sendBytes(buildCommandLong(MAV_CMD_NAV_TAKEOFF,
+                                            0.0f, 0.0f, 0.0f,
+                                            yaw, lat, lon, targetAltAMSL));
+        });
+
+        m_flightMode = "TAKEOFF";
+        m_lastStatusText = QString("[%1] PX4 TAKEOFF → %2 m AGL (%3 m AMSL)")
+                               .arg(m_name).arg(altitudeM, 0, 'f', 1).arg(targetAltAMSL, 0, 'f', 1);
+        addFlightLog("NAV", QString("PX4 Takeoff commanded: target altitude %1 m AGL (AMSL %2 m)")
+                               .arg(altitudeM, 0, 'f', 1).arg(targetAltAMSL, 0, 'f', 1));
+        emit flightModeChanged();
+        emit statusTextReceived();
+        qDebug() << "[Drone" << m_sysId << "] PX4 TAKEOFF sent: target Alt AGL" << altitudeM << "m, AMSL" << targetAltAMSL << "m";
+    } else {
+        // ArduPilot / Generic
+        setFlightMode("GUIDED");
+
+        if (!m_armed) {
+            emit sendBytes(buildCommandLong(MAV_CMD_COMPONENT_ARM_DISARM, 1.0f));
+            m_armed = true;
+            emit armedChanged();
+        }
+
+        // ArduPilot expects relative altitude in param 7
+        emit sendBytes(buildCommandLong(MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0,
+                                        static_cast<float>(altitudeM)));
+
+        // Send a 250ms retry to ensure arm state was processed
+        QTimer::singleShot(250, this, [this, altitudeM]() {
+            emit sendBytes(buildCommandLong(MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0,
+                                            static_cast<float>(altitudeM)));
+        });
+
+        m_flightMode = "GUIDED";
+        m_lastStatusText = QString("[%1] TAKEOFF → GUIDED → %2 m")
+                               .arg(m_name).arg(altitudeM, 0, 'f', 1);
+        addFlightLog("NAV", QString("Takeoff command executed to target altitude %1 m AGL").arg(altitudeM, 0, 'f', 1));
+        emit flightModeChanged();
+        emit statusTextReceived();
+        qDebug() << "[Drone" << m_sysId << "] ArduPilot GUIDED + ARM + TAKEOFF sent to" << altitudeM << "m";
     }
-
-    // Step 2 – arm (in case not already armed)
-    emit sendBytes(buildCommandLong(MAV_CMD_COMPONENT_ARM_DISARM, 1.0f));
-
-    // Step 3 – NAV_TAKEOFF
-    emit sendBytes(buildCommandLong(MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0,
-                                    static_cast<float>(altitudeM)));
-
-    m_flightMode = "GUIDED";
-    m_lastStatusText = QString("[%1] TAKEOFF → GUIDED → %2 m")
-                           .arg(m_name).arg(altitudeM, 0, 'f', 1);
-    addFlightLog("NAV", QString("Takeoff command executed to target altitude %1 m AGL").arg(altitudeM, 0, 'f', 1));
-    emit flightModeChanged();
-    emit statusTextReceived();
-    qDebug() << "[Drone" << m_sysId << "] GUIDED + ARM + TAKEOFF sent to" << altitudeM << "m";
 }
 
 void DroneVehicle::returnToLaunch()
 {
+    setFlightMode("RTL");
     emit sendBytes(buildCommandLong(MAV_CMD_NAV_RETURN_TO_LAUNCH));
     m_flightMode = "RTL";
     m_lastStatusText = QString("[%1] RETURNING TO LAUNCH (RTL)").arg(m_name);
@@ -458,6 +554,7 @@ void DroneVehicle::returnToLaunch()
 
 void DroneVehicle::land()
 {
+    setFlightMode("LAND");
     emit sendBytes(buildCommandLong(MAV_CMD_NAV_LAND));
     m_flightMode = "LAND";
     m_lastStatusText = QString("[%1] LANDING initiated").arg(m_name);
@@ -522,10 +619,19 @@ void DroneVehicle::startMission()
 
 void DroneVehicle::pauseMission()
 {
-    emit sendBytes(buildCommandLong(MAV_CMD_DO_PAUSE_CONTINUE, 0));
-    m_flightMode = "LOITER";
-    m_lastStatusText = QString("[%1] Mission Paused (Loiter)").arg(m_name);
-    addFlightLog("NAV", "Mission paused — Aircraft entered LOITER position hold");
+    if (m_autopilotType == "PX4") {
+        setFlightMode("HOLD");
+        emit sendBytes(buildCommandLong(MAV_CMD_DO_PAUSE_CONTINUE, 0));
+        m_flightMode = "HOLD";
+        m_lastStatusText = QString("[%1] Mission Paused (Hold)").arg(m_name);
+        addFlightLog("NAV", "Mission paused — Aircraft entered HOLD position hold");
+    } else {
+        setFlightMode("LOITER");
+        emit sendBytes(buildCommandLong(MAV_CMD_DO_PAUSE_CONTINUE, 0));
+        m_flightMode = "LOITER";
+        m_lastStatusText = QString("[%1] Mission Paused (Loiter)").arg(m_name);
+        addFlightLog("NAV", "Mission paused — Aircraft entered LOITER position hold");
+    }
     emit flightModeChanged();
     emit statusTextReceived();
 }
@@ -946,9 +1052,90 @@ QVariantMap DroneVehicle::runPreflightCheck()
     return res;
 }
 
+QStringList DroneVehicle::availableFlightModes() const
+{
+    if (m_autopilotType == "PX4") {
+        return { "HOLD", "LOITER", "POSCTL", "ALTCTL", "MISSION", "TAKEOFF", "RTL", "LAND", "OFFBOARD", "MANUAL", "ACRO", "STABILIZED" };
+    }
+    return { "GUIDED", "AUTO", "LOITER", "STABILIZE", "ALT_HOLD", "RTL", "LAND", "BRAKE", "POSHOLD", "ACRO", "CIRCLE" };
+}
+
 void DroneVehicle::setFlightMode(const QString &mode)
 {
-    // Flight mode mapping (ArduCopter custom mode numbers)
+    QString upperMode = mode.toUpper().trimmed();
+    if (upperMode.isEmpty()) return;
+
+    if (m_autopilotType == "PX4") {
+        uint8_t mainMode = 0;
+        uint8_t subMode  = 0;
+
+        if (upperMode == "MANUAL") {
+            mainMode = 1; // PX4_CUSTOM_MAIN_MODE_MANUAL
+        } else if (upperMode == "ALTCTL" || upperMode == "ALT_HOLD" || upperMode == "ALTITUDE") {
+            mainMode = 2; // PX4_CUSTOM_MAIN_MODE_ALTCTL
+        } else if (upperMode == "POSCTL" || upperMode == "POSHOLD" || upperMode == "POSITION" || upperMode == "GUIDED") {
+            mainMode = 3; // PX4_CUSTOM_MAIN_MODE_POSCTL
+        } else if (upperMode == "AUTO" || upperMode == "MISSION") {
+            mainMode = 4; // PX4_CUSTOM_MAIN_MODE_AUTO
+            subMode  = 4; // PX4_CUSTOM_SUB_MODE_AUTO_MISSION
+        } else if (upperMode == "LOITER" || upperMode == "HOLD" || upperMode == "BRAKE") {
+            mainMode = 4; // PX4_CUSTOM_MAIN_MODE_AUTO
+            subMode  = 3; // PX4_CUSTOM_SUB_MODE_AUTO_LOITER
+        } else if (upperMode == "TAKEOFF") {
+            mainMode = 4; // PX4_CUSTOM_MAIN_MODE_AUTO
+            subMode  = 2; // PX4_CUSTOM_SUB_MODE_AUTO_TAKEOFF
+        } else if (upperMode == "RTL" || upperMode == "RETURN") {
+            mainMode = 4; // PX4_CUSTOM_MAIN_MODE_AUTO
+            subMode  = 5; // PX4_CUSTOM_SUB_MODE_AUTO_RTL
+        } else if (upperMode == "LAND") {
+            mainMode = 4; // PX4_CUSTOM_MAIN_MODE_AUTO
+            subMode  = 6; // PX4_CUSTOM_SUB_MODE_AUTO_LAND
+        } else if (upperMode == "FOLLOW_ME") {
+            mainMode = 4; // PX4_CUSTOM_MAIN_MODE_AUTO
+            subMode  = 8; // PX4_CUSTOM_SUB_MODE_AUTO_FOLLOW_TARGET
+        } else if (upperMode == "ACRO") {
+            mainMode = 5; // PX4_CUSTOM_MAIN_MODE_ACRO
+        } else if (upperMode == "OFFBOARD") {
+            mainMode = 6; // PX4_CUSTOM_MAIN_MODE_OFFBOARD
+        } else if (upperMode == "STABILIZE" || upperMode == "STABILIZED") {
+            mainMode = 7; // PX4_CUSTOM_MAIN_MODE_STABILIZED
+        } else if (upperMode == "RATTITUDE") {
+            mainMode = 8; // PX4_CUSTOM_MAIN_MODE_RATTITUDE
+        } else {
+            qWarning() << "[Drone" << m_sysId << "] Unknown PX4 mode requested:" << mode;
+            return;
+        }
+
+        uint32_t px4CustomMode = (static_cast<uint32_t>(subMode) << 24) |
+                                 (static_cast<uint32_t>(mainMode) << 16);
+
+        // 1. Send MAV_CMD_DO_SET_MODE (primary modern MAVLink standard)
+        emit sendBytes(buildCommandLong(MAV_CMD_DO_SET_MODE,
+                                        static_cast<float>(MAV_MODE_FLAG_CUSTOM_MODE_ENABLED),
+                                        static_cast<float>(mainMode),
+                                        static_cast<float>(subMode)));
+
+        // 2. Also send mavlink_msg_set_mode_pack for backward compatibility
+        mavlink_message_t msg;
+        uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+        mavlink_msg_set_mode_pack(
+            k_gcsSystemId, k_gcsCompId, &msg,
+            m_sysId,
+            MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
+            px4CustomMode);
+        int len = mavlink_msg_to_send_buffer(buf, &msg);
+        emit sendBytes(QByteArray(reinterpret_cast<char*>(buf), len));
+
+        m_flightMode = upperMode;
+        m_lastStatusText = QString("[%1] Flight Mode: %2").arg(m_name, upperMode);
+        addFlightLog("MODE", QString("PX4 Flight mode commanded: %1 (main=%2, sub=%3)").arg(upperMode).arg(mainMode).arg(subMode));
+        emit flightModeChanged();
+        emit statusTextReceived();
+        qDebug() << "[Drone" << m_sysId << "] Set PX4 Flight Mode:" << upperMode << "main:" << mainMode << "sub:" << subMode;
+        return;
+    }
+
+    // ArduPilot / Generic
     static const QMap<QString, int> modeMap = {
         {"STABILIZE", 0}, {"ACRO", 1}, {"ALT_HOLD", 2}, {"AUTO", 3},
         {"GUIDED", 4}, {"LOITER", 5}, {"RTL", 6}, {"CIRCLE", 7},
@@ -956,10 +1143,23 @@ void DroneVehicle::setFlightMode(const QString &mode)
         {"GUIDED_NOGPS", 20}, {"SMARTRTL", 21},
     };
 
-    QString upperMode = mode.toUpper();
     int modeNum = modeMap.value(upperMode, -1);
-    if (modeNum < 0) { qWarning() << "Unknown mode:" << mode; return; }
+    if (modeNum < 0) {
+        if (upperMode == "HOLD") modeNum = 5;       // LOITER
+        else if (upperMode == "MISSION") modeNum = 3; // AUTO
+        else {
+            qWarning() << "[Drone" << m_sysId << "] Unknown ArduPilot mode:" << mode;
+            return;
+        }
+    }
 
+    // 1. Send MAV_CMD_DO_SET_MODE
+    emit sendBytes(buildCommandLong(MAV_CMD_DO_SET_MODE,
+                                    static_cast<float>(MAV_MODE_FLAG_CUSTOM_MODE_ENABLED),
+                                    static_cast<float>(modeNum),
+                                    0.0f));
+
+    // 2. Also send mavlink_msg_set_mode_pack
     mavlink_message_t msg;
     uint8_t buf[MAVLINK_MAX_PACKET_LEN];
     mavlink_msg_set_mode_pack(
@@ -973,9 +1173,10 @@ void DroneVehicle::setFlightMode(const QString &mode)
 
     m_flightMode = upperMode;
     m_lastStatusText = QString("[%1] Flight Mode: %2").arg(m_name, upperMode);
-    addFlightLog("MODE", QString("Flight mode set to %1").arg(upperMode));
+    addFlightLog("MODE", QString("ArduPilot Flight mode commanded: %1 (modeNum=%2)").arg(upperMode).arg(modeNum));
     emit flightModeChanged();
     emit statusTextReceived();
+    qDebug() << "[Drone" << m_sysId << "] Set ArduPilot Flight Mode:" << upperMode << "num:" << modeNum;
 }
 
 void DroneVehicle::updateSimulatedTelemetry(double lat, double lon, double alt, double relAlt,
