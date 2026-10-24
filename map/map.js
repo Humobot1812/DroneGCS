@@ -343,6 +343,8 @@ function setWaypoints(wps) {
 
 // ── Geofence (High-Contrast STANAG 4586 Boundary Differentiation) ─────────────
 let geofenceRadiusCircle = null;
+let geofencePolygonItem = null;
+let lastGeofencePolygon = null;
 
 function setGeofence(poly) {
     setGeofencePolygon(poly, true);
@@ -350,6 +352,11 @@ function setGeofence(poly) {
 
 function setGeofencePolygon(poly, isKeepIn) {
     if (!poly || poly.length < 3) return;
+    lastGeofencePolygon = poly;
+    if (geofencePolygonItem && geofenceLayer.hasLayer(geofencePolygonItem)) {
+        geofenceLayer.removeLayer(geofencePolygonItem);
+        geofencePolygonItem = null;
+    }
     const latLngs = poly.map(p => [p.lat, p.lon]);
     const isKeepInZone = (isKeepIn === undefined || isKeepIn);
 
@@ -359,7 +366,7 @@ function setGeofencePolygon(poly, isKeepIn) {
     const dashPattern = isKeepInZone ? '' : '8 6';
     const fillOp      = isKeepInZone ? 0.18 : 0.28;
 
-    L.polygon(latLngs, {
+    geofencePolygonItem = L.polygon(latLngs, {
         color: strokeColor,
         weight: 3.0,
         fillColor: fillColor,
@@ -397,6 +404,9 @@ function clearGeofenceCircle() {
 function clearGeofence() {
     geofenceLayer.clearLayers();
     geofenceRadiusCircle = null;
+    geofencePolygonItem = null;
+    lastGeofencePolygon = null;
+    drawnLayer.clearLayers();
 }
 
 // ── Dynamic Battery Safe Return Radius ─────────────────────────────────────────
@@ -520,6 +530,9 @@ map.on(L.Draw.Event.CREATED, function(e) {
     stopDraw();
 
     const coords = e.layer.getLatLngs()[0].map(p => ({ lat: p.lat, lon: p.lng }));
+    // Immediately register and visualize as safety geofence
+    setGeofencePolygon(coords, true);
+
     if (bridge && typeof bridge.onPolygonDrawn === 'function') {
         bridge.onPolygonDrawn(JSON.stringify(coords));
     }
@@ -560,14 +573,16 @@ function centerOn(lat, lon) {
 }
 
 function clearAll() {
-    waypointLayer.clearLayers();
-    // Safety geofences (circular and polygons) are preserved and not cleared by overlay reset
-    drawnLayer.clearLayers();
+    // RESET clears temporary measurement overlays and active interaction tool mode.
+    // CRITICAL SAFETY REQUIREMENT: Geofences (circular fences and boundary polygons) are preserved and never removed on RESET.
     measureLayer.clearLayers();
     measurePoints = [];
-    manualWaypointList = [];
-    manualWpLayer.clearLayers();
     setInteractionMode(null);
+
+    // Re-assert geofence polygon in geofenceLayer if it exists
+    if (lastGeofencePolygon && (!geofencePolygonItem || !geofenceLayer.hasLayer(geofencePolygonItem))) {
+        setGeofencePolygon(lastGeofencePolygon, true);
+    }
 }
 
 function clearWaypoints() {

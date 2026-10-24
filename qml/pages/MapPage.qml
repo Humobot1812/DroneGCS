@@ -33,8 +33,11 @@ Rectangle {
             if (typeof missionPage !== "undefined" && missionPage.setPolygon) {
                 missionPage.setPolygon(coords);
             }
-            if (drone && drone.geofenceEnabled) {
-                drone.uploadGeofence(coords, drone.geofenceMaxAlt, drone.geofenceMinAlt, drone.geofenceRadius, drone.geofenceAction);
+            if (drone) {
+                drone.setGeofencePolygon(coords);
+                if (drone.geofenceEnabled) {
+                    drone.uploadGeofence(coords, drone.geofenceMaxAlt, drone.geofenceMinAlt, drone.geofenceRadius, drone.geofenceAction);
+                }
             }
         }
 
@@ -73,17 +76,15 @@ Rectangle {
             }
         }
         function onGeofenceChanged() {
-            if (drone && drone.geofenceEnabled) {
+            if (drone) {
                 if (drone.geofencePolygon && drone.geofencePolygon.length >= 3) {
                     mapView.runJavaScript("setGeofence(" + JSON.stringify(drone.geofencePolygon) + ");");
                 }
                 if (drone.circularFenceEnabled && drone.homeLat !== 0) {
                     mapView.runJavaScript("setGeofenceRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.geofenceRadius + ");");
+                } else if (!drone.circularFenceEnabled) {
+                    mapView.runJavaScript("clearGeofenceCircle();");
                 }
-            } else if (!drone || !drone.geofenceEnabled) {
-                mapView.runJavaScript("clearGeofence();");
-            } else if (!drone.circularFenceEnabled) {
-                mapView.runJavaScript("clearGeofenceCircle();");
             }
         }
         function onGeofencePolygonChanged() {
@@ -836,7 +837,7 @@ Rectangle {
 
                 Item { Layout.fillWidth: true }
 
-                // Clear Overlays
+                // Clear Overlays (Preserves safety geofence and active mission)
                 Rectangle {
                     width: 60; height: 26; radius: 4
                     color: "#21262d"; border.color: "#30363d"; border.width: 1
@@ -847,6 +848,15 @@ Rectangle {
                             root.activeInteractionMode = "none";
                             drawBtn.drawActive = false;
                             mapView.runJavaScript("clearAll()");
+                            // Explicitly keep and re-render geofence if present
+                            if (drone) {
+                                if (drone.geofencePolygon && drone.geofencePolygon.length >= 3) {
+                                    mapView.runJavaScript("setGeofence(" + JSON.stringify(drone.geofencePolygon) + ");");
+                                }
+                                if (drone.geofenceRadius > 0 && drone.homeLat !== 0 && (drone.circularFenceEnabled || drone.geofenceEnabled)) {
+                                    mapView.runJavaScript("setGeofenceRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.geofenceRadius + ");");
+                                }
+                            }
                         }
                     }
                 }
