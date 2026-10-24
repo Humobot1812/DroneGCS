@@ -13,6 +13,8 @@ public:
     void connect()    override;
     void disconnect() override;
     bool isConnected() const override { return m_socket && m_socket->state() != QAbstractSocket::UnconnectedState; }
+    QString host() const { return m_host; }
+    int port() const { return m_port; }
     QString description() const override {
         return QString("UDP %1:%2").arg(m_host).arg(m_port);
     }

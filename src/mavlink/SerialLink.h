@@ -13,6 +13,8 @@ public:
     void connect()    override;
     void disconnect() override;
     bool isConnected() const override { return m_port && m_port->isOpen(); }
+    QString portName() const { return m_portName; }
+    int baudRate() const { return m_baudRate; }
     QString description() const override {
         return QString("Serial %1 @ %2").arg(m_portName).arg(m_baudRate);
     }

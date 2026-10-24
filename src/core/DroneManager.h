@@ -56,6 +56,7 @@ public slots:
     Q_INVOKABLE void setActiveDroneIndex(int index);
     Q_INVOKABLE QStringList availableSerialPorts() const;
     Q_INVOKABLE void autoConnect();   // Scan & connect to first known FC port
+    Q_INVOKABLE void removeDisconnectedDrones();
     Q_INVOKABLE DroneVehicle* droneAt(int index) const;
     DroneVehicle* getOrCreateDrone(quint8 sysId);
 

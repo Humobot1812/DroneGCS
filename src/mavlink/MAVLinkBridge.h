@@ -22,4 +22,5 @@ private slots:
 private:
     AbstractLink *m_link = nullptr;
     QByteArray    m_buffer;
+    uint8_t       m_channel = 1;
 };

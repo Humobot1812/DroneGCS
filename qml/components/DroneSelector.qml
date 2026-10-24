@@ -101,7 +101,7 @@ Rectangle {
                             font.pixelSize: 10
                             color: closeHover.containsMouse ? "#f85149" : "#7d8590"
                             anchors.centerIn: parent
-                            visible: closeHover.containsMouse || active
+                            visible: closeHover.containsMouse || active || !model.connected
                         }
                         MouseArea {
                             id: closeHover

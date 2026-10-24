@@ -8,6 +8,41 @@
 
 #include <QSerialPortInfo>
 #include <QDebug>
+#include <ardupilotmega/mavlink.h>
+
+static bool isAutopilotVehicleType(uint8_t type)
+{
+    switch (type) {
+    case MAV_TYPE_GENERIC:
+    case MAV_TYPE_FIXED_WING:
+    case MAV_TYPE_QUADROTOR:
+    case MAV_TYPE_COAXIAL:
+    case MAV_TYPE_HELICOPTER:
+    case MAV_TYPE_HEXAROTOR:
+    case MAV_TYPE_OCTOROTOR:
+    case MAV_TYPE_TRICOPTER:
+    case MAV_TYPE_FLAPPING_WING:
+    case MAV_TYPE_KITE:
+    case MAV_TYPE_GROUND_ROVER:
+    case MAV_TYPE_SURFACE_BOAT:
+    case MAV_TYPE_SUBMARINE:
+    case MAV_TYPE_VTOL_TAILSITTER_DUOROTOR:
+    case MAV_TYPE_VTOL_TAILSITTER_QUADROTOR:
+    case MAV_TYPE_VTOL_TILTROTOR:
+    case MAV_TYPE_VTOL_FIXEDROTOR:
+    case MAV_TYPE_VTOL_TAILSITTER:
+    case MAV_TYPE_VTOL_TILTWING:
+    case MAV_TYPE_VTOL_RESERVED5:
+    case MAV_TYPE_DODECAROTOR:
+    case MAV_TYPE_AIRSHIP:
+    case MAV_TYPE_FREE_BALLOON:
+    case MAV_TYPE_ROCKET:
+    case MAV_TYPE_PARAFOIL:
+        return true;
+    default:
+        return false;
+    }
+}
 
 const QStringList DroneManager::k_droneColors = {
     "#00d4ff",  // cyan
@@ -73,6 +108,16 @@ QHash<int, QByteArray> DroneManager::roleNames() const
 
 void DroneManager::addSerialConnection(const QString &port, int baudRate)
 {
+    // Deduplicate: avoid re-opening identical serial port
+    for (auto *l : m_links) {
+        if (auto *s = qobject_cast<SerialLink*>(l)) {
+            if (s->portName() == port) {
+                qDebug() << "DroneManager: Serial port" << port << "already open";
+                return;
+            }
+        }
+    }
+
     qDebug() << "DroneManager: adding serial" << port << "@" << baudRate;
     auto *link = new SerialLink(port, baudRate, this);
     auto *bridge = new MAVLinkBridge(link, this);
@@ -93,6 +138,16 @@ void DroneManager::addSerialConnection(const QString &port, int baudRate)
 
 void DroneManager::addUDPConnection(const QString &host, int port)
 {
+    // Deduplicate: avoid binding to identical UDP port multiple times
+    for (auto *l : m_links) {
+        if (auto *u = qobject_cast<UDPLink*>(l)) {
+            if (u->port() == port) {
+                qDebug() << "DroneManager: UDP port" << port << "already listening";
+                return;
+            }
+        }
+    }
+
     qDebug() << "DroneManager: adding UDP" << host << ":" << port;
     auto *link = new UDPLink(host, port, this);
     auto *bridge = new MAVLinkBridge(link, this);
@@ -113,6 +168,16 @@ void DroneManager::addUDPConnection(const QString &host, int port)
 
 void DroneManager::addTCPConnection(const QString &host, int port)
 {
+    // Deduplicate: avoid duplicate TCP connections
+    for (auto *l : m_links) {
+        if (auto *t = qobject_cast<TCPLink*>(l)) {
+            if (t->host() == host && t->port() == port) {
+                qDebug() << "DroneManager: TCP" << host << ":" << port << "already active";
+                return;
+            }
+        }
+    }
+
     qDebug() << "DroneManager: adding TCP" << host << ":" << port;
     auto *link = new TCPLink(host, port, this);
     auto *bridge = new MAVLinkBridge(link, this);
@@ -148,18 +213,87 @@ void DroneManager::removeConnection(int index)
     emit droneRemoved(index);
 }
 
+void DroneManager::removeDisconnectedDrones()
+{
+    for (int i = m_drones.count() - 1; i >= 0; --i) {
+        DroneVehicle *d = m_drones.at(i);
+        if (d && !d->isConnected()) {
+            qDebug() << "DroneManager: removing dummy/disconnected drone:" << d->name();
+            removeConnection(i);
+        }
+    }
+}
+
 void DroneManager::routePacket(quint8 sysId, const QByteArray &rawPacket)
 {
+    // Drop invalid broadcast (0) or GCS range (>= 250)
+    if (sysId == 0 || sysId >= 250) return;
+
+    // 1. If drone already exists, route packet directly
+    DroneVehicle *existingDrone = droneById(sysId);
+    if (existingDrone) {
+        existingDrone->processPacket(rawPacket);
+        return;
+    }
+
+    // 2. Drone does NOT exist yet.
+    // Strictly verify that this packet is a valid HEARTBEAT from an actual vehicle autopilot
+    // before instantiating any DroneVehicle instance.
+    mavlink_message_t msg;
+    mavlink_status_t status;
+    bool foundValidVehicleHeartbeat = false;
+
+    for (int i = 0; i < rawPacket.size(); ++i) {
+        uint8_t byte = static_cast<uint8_t>(rawPacket.at(i));
+        if (mavlink_parse_char(MAVLINK_COMM_0, byte, &msg, &status)) {
+            if (msg.sysid == sysId && msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
+                mavlink_heartbeat_t hb;
+                mavlink_msg_heartbeat_decode(&msg, &hb);
+
+                // Autopilot check: must NOT be invalid (non-autopilot components report MAV_AUTOPILOT_INVALID)
+                if (hb.autopilot == MAV_AUTOPILOT_INVALID) {
+                    qDebug() << "DroneManager: rejecting heartbeat with MAV_AUTOPILOT_INVALID from sysId" << sysId;
+                    return;
+                }
+
+                // Vehicle type check: must be a real vehicle (not GCS, companion, gimbal, tracker, etc.)
+                if (!isAutopilotVehicleType(hb.type)) {
+                    qDebug() << "DroneManager: rejecting heartbeat from non-vehicle MAV_TYPE" << hb.type << "from sysId" << sysId;
+                    return;
+                }
+
+                foundValidVehicleHeartbeat = true;
+                break;
+            }
+        }
+    }
+
+    if (!foundValidVehicleHeartbeat) {
+        // Not a verified vehicle heartbeat; ignore packet so no dummy drone is created.
+        return;
+    }
+
+    // Clean up any previous dummy/disconnected drones before adding the newly verified vehicle
+    removeDisconnectedDrones();
+
+    // Now instantiate the actual verified drone
     DroneVehicle *drone = getOrCreateDrone(sysId);
-    drone->processPacket(rawPacket);
+    if (drone) {
+        drone->processPacket(rawPacket);
+    }
 }
 
 DroneVehicle* DroneManager::getOrCreateDrone(quint8 sysId)
 {
+    if (sysId == 0 || sysId >= 250) {
+        qWarning() << "DroneManager::getOrCreateDrone rejected invalid sysId=" << sysId;
+        return nullptr;
+    }
+
     for (auto *d : m_drones)
         if (d->sysId() == sysId) return d;
 
-    // New drone discovered
+    // New verified drone discovered
     int idx = m_drones.count();
     beginInsertRows(QModelIndex(), idx, idx);
 
