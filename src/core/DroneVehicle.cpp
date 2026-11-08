@@ -2090,7 +2090,7 @@ void DroneVehicle::setParamWithType(const QString &paramName, float value, int p
     m_paramValues[paramName] = value;
     m_parameters[paramName] = value;
     emit parametersChanged();
-    m_lastStatusText = QString("[%1] Param %2 set to %3").arg(m_name, paramName).arg(value);
+    m_lastStatusText = QString("[%1] Parameter uploaded").arg(m_name);
     emit statusTextReceived();
 }
 
@@ -2129,7 +2129,7 @@ void DroneVehicle::processNextParamUpload()
         emit paramUploadActiveChanged();
         emit paramUploadProgressChanged();
 
-        m_lastStatusText = QString("[%1] All %2 parameters successfully updated in vehicle").arg(m_name).arg(m_paramUploadTotal);
+        m_lastStatusText = QString("[%1] Parameter uploaded").arg(m_name);
         emit statusTextReceived();
         addFlightLog("INFO", QString("Uploaded and updated all %1 parameters in vehicle").arg(m_paramUploadTotal));
         emit parametersChanged();

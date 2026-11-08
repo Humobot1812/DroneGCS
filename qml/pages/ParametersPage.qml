@@ -32,10 +32,9 @@ Rectangle {
                     paramModel.setProperty(i, "dirty", false);
                 }
                 dirtyCount = 0;
-                var vehicleName = drone ? (drone.name || ("Drone " + drone.sysId)) : "vehicle";
-                showNotification("✓ All " + count + " parameters successfully updated at once in " + vehicleName, true);
+                showNotification("✓ Parameter uploaded", true);
                 if (typeof audioAnnunciator !== "undefined" && audioAnnunciator) {
-                    audioAnnunciator.say("All parameters updated in vehicle successfully");
+                    audioAnnunciator.say("Parameter uploaded");
                 }
             } else {
                 showNotification("Parameter upload completed or encountered empty list.", false);
@@ -1070,7 +1069,7 @@ Rectangle {
             if (andUploadAll) {
                 uploadAllParametersToDrone();
             } else {
-                showNotification("Parameter " + name + " added to list. Click 'Upload All to Drone' to update vehicle.", true);
+                showNotification("Parameter added to list", true);
             }
         }
     }
@@ -1120,13 +1119,7 @@ Rectangle {
             });
         }
 
-        var vehicleName = drone.name ? drone.name : ("Drone " + drone.sysId);
-        showNotification("Uploading all " + list.length + " parameters to " + vehicleName + "...", true);
-
-        if (typeof audioAnnunciator !== "undefined" && audioAnnunciator) {
-            audioAnnunciator.say("Uploading all parameters to vehicle");
-        }
-
+        showNotification("Uploading parameters to vehicle...", true);
         drone.uploadAllParameters(list);
     }
 
@@ -1146,11 +1139,10 @@ Rectangle {
         paramModel.setProperty(idx, "dirty", false);
         updateDirtyCount();
 
-        var vehicleName = drone.name ? drone.name : ("Drone " + drone.sysId);
-        showNotification("✓ Parameter " + item.name + " = " + floatVal + " uploaded to " + vehicleName, true);
+        showNotification("✓ Parameter uploaded", true);
 
         if (typeof audioAnnunciator !== "undefined" && audioAnnunciator) {
-            audioAnnunciator.say("Parameter " + item.name + " uploaded");
+            audioAnnunciator.say("Parameter uploaded");
         }
     }
 
