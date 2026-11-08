@@ -151,12 +151,27 @@ To eliminate accidental operator errors, critical vehicle states (Arming, Takeof
 * **Natural Language UAV Command**: Command takeoff, return-to-launch, mode transitions, or mission pause using conversational English.
 * **Automated SITREP Reports**: Instant situational awareness summaries detailing position, battery endurance, navigation target, and safety status.
 
-### Geospatial Tactical Map Engine
+### Geospatial Tactical Map Engine (2D & 3D Real-Time Geospatial Environment)
+* **2D & 3D Map Switching**: Seamlessly toggle between high-performance 2D Leaflet cartography and a full interactive 3D CesiumJS geospatial globe within the primary Map workspace.
+* **Real-Time 3D Drone Model**: Displays a high-contrast 3D airframe reflecting live telemetry (latitude, longitude, relative/absolute altitude, heading, roll, pitch, yaw).
+* **3D Camera Navigation Modes**:
+  * **Free Camera**: Orbit, pan, rotate, and tilt freely with mouse controls.
+  * **Follow Drone**: Dynamic chase cam locked to the vehicle's position and orientation.
+  * **Top-Down**: Orthographic nadir view for tactical situational awareness.
+  * **Overview**: High-angle tactical overview of the operational theater.
+* **3D Mission Visualization**: Renders true-to-scale 3D waypoint paths, differentiating between completed (dimmed cyan) and upcoming (bright yellow/orange) flight segments, with waypoint labels and post-mission RTL return vectors.
 * **Interactive Mapping**: Powered by an embedded Leaflet/WebEngine core with seamless tile switching (Google Satellite, Google Hybrid, ESRI Satellite, OpenStreetMap, Tactical Dark, Google Terrain).
 * **Dynamic Vehicle Markers**: Real-time heading-aligned aircraft icons, home position markers, and animated breadcrumb trails.
 * **Interactive Waypoint Editor**: Point-and-click waypoint sequencing with altitude, speed, acceptance radius, and loiter time controls.
 * **Survey and Grid Missions**: Automated flight path generation for aerial mapping and reconnaissance.
 * **Mission Elevation Profile**: Interactive elevation chart displaying planned flight trajectory against terrain data with clearance warnings.
+
+### Unified Vehicle Parameters & Batch Upload Subsystem
+* **One-Click Batch Parameter Upload**: Primary `Upload All to Drone` action transmits the entire parameter tree to onboard autopilot memory at once.
+* **Paced MAVLink Transmission**: Implements 15ms packet pacing to prevent buffer overflow and telemetry packet drops over serial and SiK/RFD900 radio links.
+* **Real-Time Progress & Annunciation**: Live percentage progress bar with audio and toast confirmation (*"Parameter uploaded"*).
+* **Direct Parameter Injection**: Add and upload new custom parameters directly with type selection (`REAL32`, `INT32`, `INT16`, `INT8`) and auto-presets for ArduPilot and PX4.
+* **Inline Table Editing**: Double-click any parameter value to modify inline with instant modified tracking badges.
 
 ### Universal 1-Click Auto-Connect
 * **Multi-Transport Scanning Engine**:
@@ -172,9 +187,11 @@ To eliminate accidental operator errors, critical vehicle states (Arming, Takeof
 ### Safety, Geofencing, and Pre-Flight Diagnostics
 * **Interactive Geofence Console**: Configure circular and polygonal keep-in/keep-out safety boundaries with ceiling and floor constraints.
 * **Bidirectional Geofence Sync**: Upload safety fences directly to the autopilot, or automatically download pre-existing geofences stored on the drone.
+* **Critical Battery RTL Failsafe**: Automatic Return-to-Launch triggered when vehicle battery drops below 10%, with a user-configurable on/off master toggle in Flight Safety Settings.
+* **Non-Destructive RTL Mission Integration**: Automatically appends Return-To-Launch after the final user waypoint, strictly preserving all planned waypoints.
 * **Slide-to-Confirm Arming**: Safeguarded tactile sliders for critical flight commands (Arm, Disarm, Takeoff, Return-to-Launch, Land, Emergency Kill).
 * **Pre-Flight Checklist Engine**: Interactive pre-arm verification covering IMU calibration, GPS lock, battery threshold, RC link, and motor readiness.
-* **Spoken Voice Annunciator**: Auditory callouts for critical flight events (Arming state, flight mode transitions, battery warnings, geofence breaches).
+* **Spoken Voice Annunciator**: Auditory callouts for critical flight events (Arming state, flight mode transitions, battery warnings, geofence breaches, and *"Mission uploaded, ready for auto mode"*).
 
 ### Real-Time Analytics and Flight Log Replay
 * **Live Telemetry Oscilloscope**: Multi-channel real-time charting for altitude, airspeed, battery voltage, climb rate, and current.
