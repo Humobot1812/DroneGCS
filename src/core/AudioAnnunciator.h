@@ -47,6 +47,7 @@ public:
     void onGpsLost(const QString &droneName = QString());
     void onMissionUploaded(int count);
     void onMissionCleared();
+    void onMissionCompleted(const QString &secondaryText);
 
 signals:
     void enabledChanged();

@@ -79,8 +79,14 @@ int main(int argc, char *argv[])
             }
         });
 
-        QObject::connect(drone, &DroneVehicle::missionCleared, &audioAnnunciator, [&audioAnnunciator]() {
-            audioAnnunciator.onMissionCleared();
+        QObject::connect(drone, &DroneVehicle::missionCleared, &audioAnnunciator, [&audioAnnunciator](bool success, const QString &/*message*/) {
+            if (success) {
+                audioAnnunciator.onMissionCleared();
+            }
+        });
+
+        QObject::connect(drone, &DroneVehicle::missionCompleted, &audioAnnunciator, [&audioAnnunciator](const QString &/*actionName*/, const QString &secondaryText) {
+            audioAnnunciator.onMissionCompleted(secondaryText);
         });
 
         if (drone->isConnected()) {
@@ -131,6 +137,7 @@ int main(int argc, char *argv[])
     bool mockDrone = false;
     bool openLogs = false;
     bool openAi = false;
+    bool openSos = false;
     for (int i = 1; i < argc; ++i) {
         QString arg = QString::fromLocal8Bit(argv[i]);
         if (arg == "--map" || arg == "-m") {
@@ -147,11 +154,14 @@ int main(int argc, char *argv[])
             openLogs = true;
         } else if (arg == "--ai") {
             openAi = true;
+        } else if (arg == "--sos" || arg == "--emergency") {
+            openSos = true;
         }
     }
     engine.rootContext()->setContextProperty("initialPage", initialPage);
     engine.rootContext()->setContextProperty("initialOpenLogs", openLogs);
     engine.rootContext()->setContextProperty("initialOpenAi", openAi);
+    engine.rootContext()->setContextProperty("initialOpenSos", openSos);
 
     if (mockDrone || !screenshotPath.isEmpty()) {
         auto *drone = droneManager.getOrCreateDrone(1);

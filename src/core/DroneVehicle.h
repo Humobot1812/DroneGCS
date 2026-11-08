@@ -66,6 +66,8 @@ class DroneVehicle : public QObject
     Q_PROPERTY(int   missionTotal    READ missionTotal    NOTIFY missionProgressChanged)
     Q_PROPERTY(bool  missionUploadActive READ missionUploadActive NOTIFY missionUploadActiveChanged)
     Q_PROPERTY(double missionUploadProgress READ missionUploadProgress NOTIFY missionUploadProgressChanged)
+    Q_PROPERTY(bool  hasMission      READ hasMission      NOTIFY missionProgressChanged)
+    Q_PROPERTY(QString postMissionAction READ postMissionAction WRITE setPostMissionAction NOTIFY postMissionActionChanged)
 
     // Status text
     Q_PROPERTY(QString lastStatusText READ lastStatusText NOTIFY statusTextReceived)
@@ -133,6 +135,8 @@ public:
     int       missionTotal()    const { return m_missionTotal; }
     bool      missionUploadActive() const { return m_missionUploadActive; }
     double    missionUploadProgress() const { return m_missionUploadProgress; }
+    bool      hasMission()      const { return m_missionTotal > 0; }
+    QString   postMissionAction() const { return m_postMissionAction; }
     QString   lastStatusText()  const { return m_lastStatusText; }
     double    homeLat()         const { return m_homeLat; }
     double    homeLon()         const { return m_homeLon; }
@@ -173,6 +177,7 @@ public:
     Q_INVOKABLE void gotoLocation(double lat, double lon, double alt);
     Q_INVOKABLE void uploadWaypoints(const QVariantList &waypoints);
     Q_INVOKABLE void clearMission();
+    Q_INVOKABLE void setPostMissionAction(const QString &action);
 
     // Pre-flight automated checklist
     Q_INVOKABLE QVariantMap runPreflightCheck();
@@ -242,7 +247,9 @@ signals:
     void missionUploadActiveChanged();
     void missionUploadProgressChanged();
     void missionUploadComplete(bool success);
-    void missionCleared();
+    void missionCleared(bool success, const QString &message);
+    void missionCompleted(const QString &actionName, const QString &secondaryText);
+    void postMissionActionChanged();
     void statusTextReceived();
     void homePositionChanged();
     void distanceToHomeChanged();
@@ -270,10 +277,13 @@ private:
 
     // MAVLink Mission Protocol helpers
     void sendMissionCount(int count);
+    void sendMissionClearAll();
     void handleMissionRequest(int seq, uint8_t missionType = 0);
     void checkGeofenceBreach();
     void updateDistancesAndReturnRadius();
     void sendMavlinkParam(const char *paramId, float value);
+    void checkMissionCompletion(const QString &triggerSource);
+    bool isMissionAutoMode(const QString &mode) const;
 
     QByteArray buildCommandLong(uint16_t cmd, float p1=0, float p2=0,
                                 float p3=0, float p4=0, float p5=0,
@@ -307,9 +317,16 @@ private:
     bool m_missionUploadActive = false;
     double m_missionUploadProgress = 0.0;
     bool m_missionClearPending = false;  // set while awaiting MISSION_ACK from MISSION_CLEAR_ALL
+    bool m_missionActive = false;        // true once AUTO mission has started
+    bool m_missionCompletedFired = false;// guard: emit missionCompleted only once per mission run
+    QString m_postMissionAction = "RTL"; // "RTL", "Land", "Hold", "Continue"
     QVariantList m_pendingWaypoints;
     QTimer *m_uploadTimeoutTimer = nullptr;
     int m_uploadRetryCount = 0;
+    QTimer *m_clearTimeoutTimer = nullptr;
+    int m_clearRetryCount = 0;
+    static constexpr int k_clearTimeoutMs = 2500;
+    static constexpr int k_clearMaxRetries = 2;
 
     QString m_lastStatusText;
 

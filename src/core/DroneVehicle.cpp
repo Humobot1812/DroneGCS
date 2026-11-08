@@ -61,9 +61,7 @@ DroneVehicle::DroneVehicle(quint8 sysId, QObject *parent)
     connect(m_heartbeatTimer, &QTimer::timeout, this, [this]() {
         qint64 now = QDateTime::currentMSecsSinceEpoch();
         if (m_connected && (m_lastPacketTime > 0 && (now - m_lastPacketTime >= 4500))) {
-            m_connected = false;
-            m_heartbeatHz = 0;
-            emit connectionChanged();
+            disconnect();
         }
     });
     m_heartbeatTimer->start();
@@ -76,6 +74,22 @@ void DroneVehicle::setColor(const QString &c) { if (m_color != c) { m_color = c;
 void DroneVehicle::disconnect()
 {
     m_connected = false;
+    m_heartbeatHz = 0;
+    m_missionActive = false;
+    m_missionCompletedFired = false;
+    if (m_missionClearPending) {
+        m_missionClearPending = false;
+        if (m_clearTimeoutTimer) m_clearTimeoutTimer->stop();
+        m_lastStatusText = QString("[%1] Clear Mission Failed: Telemetry link lost").arg(m_name);
+        emit statusTextReceived();
+        emit missionCleared(false, "Clear Mission Failed: Telemetry link lost");
+    }
+    if (m_missionUploadActive) {
+        m_missionUploadActive = false;
+        if (m_uploadTimeoutTimer) m_uploadTimeoutTimer->stop();
+        emit missionUploadActiveChanged();
+        emit missionUploadComplete(false);
+    }
     addFlightLog("WARN", QString("Telemetry link disconnected for Drone SYS:%1").arg(m_sysId));
     emit connectionChanged();
 }
@@ -191,9 +205,35 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
                     mode = ardupilotModes.value(hb.custom_mode,
                                QString("MODE:%1").arg(hb.custom_mode));
                 }
-                if (mode != m_flightMode) { m_flightMode = mode; emit flightModeChanged(); }
+                if (mode != m_flightMode) {
+                    QString prevMode = m_flightMode;
+                    m_flightMode = mode;
+                    emit flightModeChanged();
+
+                    // Multi-signal detection Channel 3 & Session Interruption Guard:
+                    if (m_missionActive && !m_missionCompletedFired) {
+                        if (isMissionAutoMode(prevMode) && !isMissionAutoMode(mode)) {
+                            bool atLastWaypoint = (m_missionTotal >= 2 && m_missionCurrent >= m_missionTotal - 1);
+                            QString upperMode = mode.toUpper().trimmed();
+                            bool isCompletionMode = (upperMode == "RTL" || upperMode == "SMARTRTL" ||
+                                                     upperMode == "LAND" || upperMode == "LOITER" ||
+                                                     upperMode == "HOLD");
+
+                            if (atLastWaypoint && isCompletionMode) {
+                                checkMissionCompletion("FLIGHT_MODE_TRANSITION (" + mode + ")");
+                            } else {
+                                m_missionActive = false;
+                                addFlightLog("NAV", QString("Mission interrupted by flight mode transition: %1 -> %2 at WP #%3/%4")
+                                                       .arg(prevMode, mode).arg(m_missionCurrent).arg(m_missionTotal - 1));
+                                qDebug() << "[Drone" << m_sysId << "] Mission interrupted by mode switch to" << mode;
+                            }
+                        }
+                    }
+                }
 
                 if (!wasConnected) {
+                    m_missionActive = false;
+                    m_missionCompletedFired = false;
                     emit connectionChanged();
                     // Automatically sync parameters and pre-existing geofence from drone upon connection
                     QTimer::singleShot(600, this, [this]() {
@@ -262,6 +302,13 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
                 mavlink_msg_mission_current_decode(&msg, &mc);
                 m_missionCurrent = mc.seq;
                 emit missionProgressChanged();
+
+                // Multi-signal detection Channel 1:
+                if (m_missionActive && !m_missionCompletedFired && m_missionTotal >= 2) {
+                    if (mc.mission_state == MISSION_STATE_COMPLETE || mc.seq >= m_missionTotal) {
+                        checkMissionCompletion("MISSION_CURRENT");
+                    }
+                }
                 break;
             }
             case MAVLINK_MSG_ID_PARAM_VALUE: {
@@ -327,6 +374,17 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
                 } else if (pName == "FENCE_ACTION") {
                     m_geofenceAction = static_cast<int>(pVal);
                     emit geofenceChanged();
+                } else if (pName == "MIS_DONE_BEHAVE") {
+                    int val = static_cast<int>(pVal);
+                    QString act;
+                    if (val == 0 || val == 1) act = "Hold";
+                    else if (val == 2) act = "RTL";
+                    else if (val == 3) act = "Land";
+                    if (!act.isEmpty() && m_postMissionAction != act) {
+                        m_postMissionAction = act;
+                        emit postMissionActionChanged();
+                        qDebug() << "[Drone" << m_sysId << "] Synchronized postMissionAction from MIS_DONE_BEHAVE:" << m_postMissionAction;
+                    }
                 }
 
                 m_paramBatchCount++;
@@ -448,6 +506,7 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
                             wp["lon"] = it.y / 1e7;
                             wp["alt"] = it.z;
                             wp["delay"] = it.param1;
+                            wp["command"] = it.command;
                             m_downloadedWaypoints.append(wp);
                         }
 
@@ -471,6 +530,25 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
                                 MAV_MISSION_ACCEPTED, MAV_MISSION_TYPE_MISSION, 0);
                             int ackLen = mavlink_msg_to_send_buffer(ackBuf, &ackMsg);
                             emit sendBytes(QByteArray(reinterpret_cast<char*>(ackBuf), ackLen));
+
+                            // Synchronize postMissionAction from downloaded terminal waypoint
+                            if (!m_downloadedWaypoints.isEmpty()) {
+                                QVariantMap lastWp = m_downloadedWaypoints.last().toMap();
+                                uint16_t lastCmd = static_cast<uint16_t>(lastWp.value("command", MAV_CMD_NAV_WAYPOINT).toUInt());
+                                QString act = "Continue";
+                                if (lastCmd == MAV_CMD_NAV_RETURN_TO_LAUNCH) act = "RTL";
+                                else if (lastCmd == MAV_CMD_NAV_LAND) act = "Land";
+                                else if (lastCmd == MAV_CMD_NAV_LOITER_UNLIM ||
+                                         lastCmd == MAV_CMD_NAV_LOITER_TIME ||
+                                         lastCmd == MAV_CMD_NAV_LOITER_TURNS) act = "Hold";
+                                else act = "Continue";
+
+                                if (m_postMissionAction != act) {
+                                    m_postMissionAction = act;
+                                    emit postMissionActionChanged();
+                                    qDebug() << "[Drone" << m_sysId << "] Synchronized postMissionAction from downloaded mission:" << m_postMissionAction;
+                                }
+                            }
 
                             emit missionDownloaded(m_downloadedWaypoints);
                             m_lastStatusText = QString("[%1] Mission downloaded (%2 waypoints)")
@@ -539,6 +617,7 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
                             wp["lon"] = static_cast<double>(it.y);
                             wp["alt"] = it.z;
                             wp["delay"] = it.param1;
+                            wp["command"] = it.command;
                             m_downloadedWaypoints.append(wp);
                         }
 
@@ -563,6 +642,25 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
                             int ackLen = mavlink_msg_to_send_buffer(ackBuf, &ackMsg);
                             emit sendBytes(QByteArray(reinterpret_cast<char*>(ackBuf), ackLen));
 
+                            // Synchronize postMissionAction from downloaded terminal waypoint
+                            if (!m_downloadedWaypoints.isEmpty()) {
+                                QVariantMap lastWp = m_downloadedWaypoints.last().toMap();
+                                uint16_t lastCmd = static_cast<uint16_t>(lastWp.value("command", MAV_CMD_NAV_WAYPOINT).toUInt());
+                                QString act = "Continue";
+                                if (lastCmd == MAV_CMD_NAV_RETURN_TO_LAUNCH) act = "RTL";
+                                else if (lastCmd == MAV_CMD_NAV_LAND) act = "Land";
+                                else if (lastCmd == MAV_CMD_NAV_LOITER_UNLIM ||
+                                         lastCmd == MAV_CMD_NAV_LOITER_TIME ||
+                                         lastCmd == MAV_CMD_NAV_LOITER_TURNS) act = "Hold";
+                                else act = "Continue";
+
+                                if (m_postMissionAction != act) {
+                                    m_postMissionAction = act;
+                                    emit postMissionActionChanged();
+                                    qDebug() << "[Drone" << m_sysId << "] Synchronized postMissionAction from downloaded mission:" << m_postMissionAction;
+                                }
+                            }
+
                             emit missionDownloaded(m_downloadedWaypoints);
                             m_lastStatusText = QString("[%1] Mission downloaded (%2 waypoints)")
                                                    .arg(m_name).arg(m_downloadedWaypoints.size());
@@ -577,6 +675,7 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
                 mavlink_mission_ack_t ack;
                 mavlink_msg_mission_ack_decode(&msg, &ack);
                 if (m_uploadTimeoutTimer) m_uploadTimeoutTimer->stop();
+                if (m_clearTimeoutTimer) m_clearTimeoutTimer->stop();
 
                 if (m_uploadingFence && (ack.mission_type == MAV_MISSION_TYPE_FENCE || ack.type == MAV_MISSION_ACCEPTED)) {
                     m_uploadingFence = false;
@@ -590,14 +689,42 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
                 if (m_missionClearPending) {
                     // This ACK is the response to MISSION_CLEAR_ALL
                     m_missionClearPending = false;
+                    m_clearRetryCount = 0;
                     if (ack.type == MAV_MISSION_ACCEPTED) {
                         qDebug() << "[Drone" << m_sysId << "] Mission CLEAR ACK accepted";
-                        emit missionCleared();
+                        m_pendingWaypoints.clear();
+                        m_missionTotal = 0;
+                        m_missionCurrent = 0;
+                        m_missionUploadActive = false;
+                        m_missionUploadProgress = 0.0;
+                        m_missionActive = false;
+                        m_missionCompletedFired = false;
+
+                        m_lastStatusText = QString("[%1] Mission Cleared Successfully. No Mission Loaded.").arg(m_name);
+                        addFlightLog("NAV", "Operator cleared all mission waypoints (confirmed by FC)");
+                        emit missionProgressChanged();
+                        emit missionUploadActiveChanged();
+                        emit missionUploadProgressChanged();
+                        emit statusTextReceived();
+                        emit missionCleared(true, "Mission Cleared Successfully. No Mission Loaded.");
                     } else {
                         qWarning() << "[Drone" << m_sysId << "] Mission CLEAR ACK rejected:" << ack.type;
-                        emit missionCleared(); // still announce clear on GCS side
+                        QString reason;
+                        switch (ack.type) {
+                            case MAV_MISSION_ERROR:               reason = "Generic mission error"; break;
+                            case MAV_MISSION_UNSUPPORTED_FRAME:   reason = "Unsupported coordinate frame"; break;
+                            case MAV_MISSION_UNSUPPORTED:         reason = "Command unsupported"; break;
+                            case MAV_MISSION_NO_SPACE:            reason = "Vehicle out of mission storage"; break;
+                            case MAV_MISSION_DENIED:              reason = "Mission clear denied by vehicle"; break;
+                            case MAV_MISSION_OPERATION_CANCELLED: reason = "Operation cancelled"; break;
+                            default:                              reason = QString("Autopilot rejection code %1").arg(ack.type); break;
+                        }
+                        m_lastStatusText = QString("[%1] Clear Mission Rejected: %2").arg(m_name).arg(reason);
+                        addFlightLog("WARN", QString("Autopilot rejected mission clear: %1").arg(reason));
+                        emit statusTextReceived();
+                        emit missionCleared(false, QString("Clear Mission Rejected: %1").arg(reason));
                     }
-                } else if (ack.type == MAV_MISSION_ACCEPTED) {
+                } else if (m_missionUploadActive && ack.type == MAV_MISSION_ACCEPTED) {
                     m_missionUploadActive = false;
                     m_missionUploadProgress = 100.0;
                     emit missionUploadActiveChanged();
@@ -607,27 +734,34 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
 
                     m_lastStatusText = QString("[%1] Mission Upload Succeeded (%2 waypoints)")
                                            .arg(m_name).arg(m_pendingWaypoints.size());
+                    addFlightLog("NAV", QString("Mission upload accepted by vehicle (%1 waypoints)").arg(m_pendingWaypoints.size()));
                     emit statusTextReceived();
 
-                    // Prime seq 1 so vehicle immediately targets first waypoint upon AUTO start
-                    mavlink_message_t setCurMsg;
-                    uint8_t setBuf[MAVLINK_MAX_PACKET_LEN];
-                    mavlink_msg_mission_set_current_pack(
-                        k_gcsSystemId, k_gcsCompId, &setCurMsg,
-                        m_sysId, MAV_COMP_ID_AUTOPILOT1,
-                        1);
-                    int setLen = mavlink_msg_to_send_buffer(setBuf, &setCurMsg);
-                    emit sendBytes(QByteArray(reinterpret_cast<char*>(setBuf), setLen));
+                    // Prime seq 1 ONLY IF waypoints actually exist
+                    if (!m_pendingWaypoints.isEmpty()) {
+                        mavlink_message_t setCurMsg;
+                        uint8_t setBuf[MAVLINK_MAX_PACKET_LEN];
+                        mavlink_msg_mission_set_current_pack(
+                            k_gcsSystemId, k_gcsCompId, &setCurMsg,
+                            m_sysId, MAV_COMP_ID_AUTOPILOT1,
+                            1);
+                        int setLen = mavlink_msg_to_send_buffer(setBuf, &setCurMsg);
+                        emit sendBytes(QByteArray(reinterpret_cast<char*>(setBuf), setLen));
 
-                    qDebug() << "[Drone" << m_sysId << "] Mission ACK ACCEPTED. Primed current seq 1";
-                } else {
+                        qDebug() << "[Drone" << m_sysId << "] Mission ACK ACCEPTED. Primed current seq 1";
+                    }
+                } else if (m_missionUploadActive) {
                     m_missionUploadActive = false;
                     emit missionUploadActiveChanged();
                     emit missionUploadComplete(false);
 
                     m_lastStatusText = QString("[%1] Mission Upload Failed: ACK %2").arg(m_name).arg(ack.type);
+                    addFlightLog("WARN", QString("Mission upload rejected by vehicle: ACK %1").arg(ack.type));
                     emit statusTextReceived();
                     qWarning() << "[Drone" << m_sysId << "] Mission ACK rejected:" << ack.type;
+                } else {
+                    qDebug() << "[Drone" << m_sysId << "] Suppressed duplicate or unsolicited MISSION_ACK, type:"
+                             << ack.type << "mission_type:" << ack.mission_type;
                 }
                 break;
             }
@@ -638,6 +772,13 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
                 m_lastStatusText = QString("[%1] Reached Waypoint #%2").arg(m_name).arg(mir.seq);
                 emit missionProgressChanged();
                 emit statusTextReceived();
+
+                // Multi-signal detection Channel 2:
+                if (m_missionActive && !m_missionCompletedFired && m_missionTotal >= 2) {
+                    if (mir.seq >= m_missionTotal - 1) {
+                        checkMissionCompletion("MISSION_ITEM_REACHED");
+                    }
+                }
                 break;
             }
             case MAVLINK_MSG_ID_STATUSTEXT: {
@@ -899,6 +1040,9 @@ void DroneVehicle::gotoLocation(double lat, double lon, double alt)
 
 void DroneVehicle::startMission()
 {
+    m_missionActive = true;
+    m_missionCompletedFired = false;
+
     // Prime seq 1
     mavlink_message_t setCurMsg;
     uint8_t setBuf[MAVLINK_MAX_PACKET_LEN];
@@ -925,6 +1069,8 @@ void DroneVehicle::startMission()
 
 void DroneVehicle::pauseMission()
 {
+    m_missionActive = false;
+
     if (m_autopilotType == "PX4") {
         setFlightMode("HOLD");
         emit sendBytes(buildCommandLong(MAV_CMD_DO_PAUSE_CONTINUE, 0));
@@ -942,10 +1088,8 @@ void DroneVehicle::pauseMission()
     emit statusTextReceived();
 }
 
-void DroneVehicle::clearMission()
+void DroneVehicle::sendMissionClearAll()
 {
-    m_missionClearPending = true;  // flag so MISSION_ACK routes to missionCleared
-
     mavlink_message_t msg;
     uint8_t buf[MAVLINK_MAX_PACKET_LEN];
     mavlink_msg_mission_clear_all_pack(
@@ -954,27 +1098,64 @@ void DroneVehicle::clearMission()
         MAV_MISSION_TYPE_MISSION);
     int len = mavlink_msg_to_send_buffer(buf, &msg);
     emit sendBytes(QByteArray(reinterpret_cast<char*>(buf), len));
+}
 
-    m_pendingWaypoints.clear();
-    m_missionTotal = 0;
-    m_missionCurrent = 0;
-    m_missionUploadActive = false;
-    m_missionUploadProgress = 0.0;
-
-    m_lastStatusText = QString("[%1] Mission Cleared").arg(m_name);
-    addFlightLog("NAV", "Operator cleared all mission waypoints");
-    emit missionProgressChanged();
-    emit missionUploadActiveChanged();
-    emit missionUploadProgressChanged();
-    emit statusTextReceived();
-
-    // If not connected, there will be no ACK — fire the signal immediately
+void DroneVehicle::clearMission()
+{
+    // 1. Connectivity pre-condition check
     if (!m_connected) {
-        m_missionClearPending = false;
-        emit missionCleared();
+        m_lastStatusText = QString("[%1] Vehicle disconnected. Unable to clear mission.").arg(m_name);
+        addFlightLog("WARN", "Clear mission attempted while disconnected");
+        emit statusTextReceived();
+        emit missionCleared(false, "Vehicle disconnected. Unable to clear mission.");
+        return;
     }
 
-    qDebug() << "[Drone" << m_sysId << "] Cleared all mission items";
+    // 2. Empty mission pre-condition check
+    if (m_missionTotal == 0 && m_pendingWaypoints.isEmpty()) {
+        m_lastStatusText = QString("[%1] No Mission Loaded.").arg(m_name);
+        emit statusTextReceived();
+        emit missionCleared(true, "No Mission Loaded.");
+        return;
+    }
+
+    // 3. Initiate clear handshake
+    m_missionClearPending = true;
+    m_clearRetryCount = 0;
+    m_missionActive = false;
+    m_missionCompletedFired = false;
+
+    sendMissionClearAll();
+
+    // 4. Start 2500ms watchdog timer with retries
+    if (!m_clearTimeoutTimer) {
+        m_clearTimeoutTimer = new QTimer(this);
+        m_clearTimeoutTimer->setInterval(k_clearTimeoutMs);
+        connect(m_clearTimeoutTimer, &QTimer::timeout, this, [this]() {
+            if (m_missionClearPending) {
+                if (m_clearRetryCount < k_clearMaxRetries) {
+                    m_clearRetryCount++;
+                    qDebug() << "[Drone" << m_sysId << "] Retrying MISSION_CLEAR_ALL attempt" << m_clearRetryCount;
+                    sendMissionClearAll();
+                } else {
+                    qWarning() << "[Drone" << m_sysId << "] Clear mission timeout - no ACK from vehicle";
+                    m_missionClearPending = false;
+                    m_clearTimeoutTimer->stop();
+                    m_lastStatusText = QString("[%1] Clear Mission timed out. No response from vehicle.").arg(m_name);
+                    addFlightLog("WARN", "Clear mission timed out awaiting ACK");
+                    emit statusTextReceived();
+                    emit missionCleared(false, "Clear Mission timed out. No response from vehicle.");
+                }
+            } else {
+                m_clearTimeoutTimer->stop();
+            }
+        });
+    }
+    m_clearTimeoutTimer->start();
+
+    m_lastStatusText = QString("[%1] Requesting mission clear from autopilot...").arg(m_name);
+    emit statusTextReceived();
+    qDebug() << "[Drone" << m_sysId << "] Initiated mission clear handshake, awaiting FC ACK";
 }
 
 void DroneVehicle::sendMissionCount(int count)
@@ -995,14 +1176,45 @@ void DroneVehicle::uploadWaypoints(const QVariantList &waypoints)
 {
     if (waypoints.isEmpty()) return;
 
+    m_missionActive = false;
+    m_missionCompletedFired = false;
     m_pendingWaypoints = waypoints;
+
+    // Harmonize post-mission action with pending waypoints
+    if (!m_pendingWaypoints.isEmpty()) {
+        QVariantMap lastWp = m_pendingWaypoints.last().toMap();
+        if (lastWp.contains("command")) {
+            uint16_t lastCmd = static_cast<uint16_t>(lastWp.value("command").toUInt());
+            QString detectedAction = "Continue";
+            if (lastCmd == MAV_CMD_NAV_RETURN_TO_LAUNCH) detectedAction = "RTL";
+            else if (lastCmd == MAV_CMD_NAV_LAND) detectedAction = "Land";
+            else if (lastCmd == MAV_CMD_NAV_LOITER_UNLIM ||
+                     lastCmd == MAV_CMD_NAV_LOITER_TIME ||
+                     lastCmd == MAV_CMD_NAV_LOITER_TURNS) detectedAction = "Hold";
+            else detectedAction = "Continue";
+
+            if (m_postMissionAction != detectedAction) {
+                m_postMissionAction = detectedAction;
+                emit postMissionActionChanged();
+            }
+        } else {
+            uint16_t injectCmd = MAV_CMD_NAV_WAYPOINT;
+            if (m_postMissionAction == "RTL") injectCmd = MAV_CMD_NAV_RETURN_TO_LAUNCH;
+            else if (m_postMissionAction == "Land") injectCmd = MAV_CMD_NAV_LAND;
+            else if (m_postMissionAction == "Hold") injectCmd = MAV_CMD_NAV_LOITER_UNLIM;
+            lastWp["command"] = injectCmd;
+            m_pendingWaypoints[m_pendingWaypoints.size() - 1] = lastWp;
+        }
+    }
+
     m_missionUploadActive = true;
     m_missionUploadProgress = 0.0;
     emit missionUploadActiveChanged();
     emit missionUploadProgressChanged();
 
-    int totalItems = waypoints.size() + 1; // seq 0 is home
+    int totalItems = m_pendingWaypoints.size() + 1; // seq 0 is home
     m_missionTotal = totalItems;
+    emit missionProgressChanged();
     m_uploadRetryCount = 0;
 
     sendMissionCount(totalItems);
@@ -1091,15 +1303,20 @@ void DroneVehicle::handleMissionRequest(int seq, uint8_t missionType)
         double lon = wp.value("lon", 0.0).toDouble();
         double alt = wp.value("alt", 20.0).toDouble();
         float delay = wp.value("delay", 0.0).toFloat();
+        uint16_t cmd = static_cast<uint16_t>(wp.value("command", MAV_CMD_NAV_WAYPOINT).toUInt());
+        float p1 = wp.value("param1", delay).toFloat();
+        float p2 = wp.value("param2", 0.0).toFloat();
+        float p3 = wp.value("param3", 0.0).toFloat();
+        float p4 = wp.value("param4", 0.0).toFloat();
 
         mavlink_msg_mission_item_int_pack(
             k_gcsSystemId, k_gcsCompId, &msg,
             m_sysId, MAV_COMP_ID_AUTOPILOT1,
             static_cast<uint16_t>(seq),
             MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
-            MAV_CMD_NAV_WAYPOINT,
+            cmd,
             0, 1, // current=0, autocontinue=1
-            delay, 0, 0, 0,
+            p1, p2, p3, p4,
             static_cast<int32_t>(lat * 1e7),
             static_cast<int32_t>(lon * 1e7),
             static_cast<float>(alt),
@@ -1897,4 +2114,113 @@ void DroneVehicle::downloadMission()
     m_lastStatusText = QString("[%1] Downloading mission from drone...").arg(m_name);
     emit statusTextReceived();
     qDebug() << "[Drone" << m_sysId << "] Requested onboard mission list from drone";
+}
+
+void DroneVehicle::setPostMissionAction(const QString &action)
+{
+    QString normalized = action.trimmed();
+    if (normalized.compare("RTL", Qt::CaseInsensitive) == 0 ||
+        normalized.compare("Return to Launch", Qt::CaseInsensitive) == 0) {
+        normalized = "RTL";
+    } else if (normalized.compare("Land", Qt::CaseInsensitive) == 0) {
+        normalized = "Land";
+    } else if (normalized.compare("Hold", Qt::CaseInsensitive) == 0 ||
+               normalized.compare("Loiter", Qt::CaseInsensitive) == 0) {
+        normalized = "Hold";
+    } else if (normalized.compare("Continue", Qt::CaseInsensitive) == 0 ||
+               normalized.compare("None", Qt::CaseInsensitive) == 0) {
+        normalized = "Continue";
+    } else {
+        qWarning() << "[Drone" << m_sysId << "] Unsupported postMissionAction:" << action;
+        return;
+    }
+
+    if (m_postMissionAction == normalized) return;
+
+    m_postMissionAction = normalized;
+    emit postMissionActionChanged();
+
+    if (!m_pendingWaypoints.isEmpty()) {
+        QVariantMap lastWp = m_pendingWaypoints.last().toMap();
+        uint16_t targetCmd = MAV_CMD_NAV_WAYPOINT;
+        if (normalized == "RTL") targetCmd = MAV_CMD_NAV_RETURN_TO_LAUNCH;
+        else if (normalized == "Land") targetCmd = MAV_CMD_NAV_LAND;
+        else if (normalized == "Hold") targetCmd = MAV_CMD_NAV_LOITER_UNLIM;
+        else if (normalized == "Continue") targetCmd = MAV_CMD_NAV_WAYPOINT;
+        lastWp["command"] = targetCmd;
+        m_pendingWaypoints[m_pendingWaypoints.size() - 1] = lastWp;
+    }
+
+    if (m_paramValues.contains("MIS_DONE_BEHAVE")) {
+        float behaveVal = 2.0f;
+        if (normalized == "Hold" || normalized == "Continue") behaveVal = 0.0f;
+        else if (normalized == "Land") behaveVal = 3.0f;
+        else if (normalized == "RTL") behaveVal = 2.0f;
+        sendMavlinkParam("MIS_DONE_BEHAVE", behaveVal);
+    }
+
+    m_lastStatusText = QString("[%1] Post-mission action configured: %2").arg(m_name, normalized);
+    addFlightLog("CONFIG", QString("Post-mission action set to %1").arg(normalized));
+    emit statusTextReceived();
+}
+
+bool DroneVehicle::isMissionAutoMode(const QString &mode) const
+{
+    QString upper = mode.toUpper().trimmed();
+    return (upper == "AUTO" || upper == "MISSION");
+}
+
+void DroneVehicle::checkMissionCompletion(const QString &triggerSource)
+{
+    if (!m_missionActive || m_missionCompletedFired) {
+        return;
+    }
+
+    if (m_missionTotal < 2) {
+        return;
+    }
+
+    m_missionCompletedFired = true;
+    m_missionActive = false;
+
+    // Determine post-mission action and secondary notification text
+    QString action = m_postMissionAction.trimmed();
+    if (action.isEmpty()) {
+        if (m_flightMode == "RTL" || m_flightMode == "SMARTRTL") {
+            action = "RTL";
+        } else if (m_flightMode == "LAND") {
+            action = "Land";
+        } else if (m_flightMode == "LOITER" || m_flightMode == "HOLD") {
+            action = "Hold";
+        } else {
+            action = "Continue";
+        }
+    }
+
+    QString actionName;
+    QString secondaryText;
+
+    if (action.compare("RTL", Qt::CaseInsensitive) == 0) {
+        actionName = "RTL";
+        secondaryText = "Mission Completed. Returning to Launch.";
+    } else if (action.compare("Land", Qt::CaseInsensitive) == 0) {
+        actionName = "Land";
+        secondaryText = "Mission Completed. Landing Initiated.";
+    } else if (action.compare("Hold", Qt::CaseInsensitive) == 0 ||
+               action.compare("Loiter", Qt::CaseInsensitive) == 0) {
+        actionName = "Hold";
+        secondaryText = "Mission Completed. Holding Position.";
+    } else {
+        actionName = "Continue";
+        secondaryText = "Mission Completed. No Automatic Action Configured.";
+    }
+
+    m_lastStatusText = QString("[%1] MISSION COMPLETED — %2").arg(m_name, secondaryText);
+    addFlightLog("NAV", QString("Mission execution completed. Trigger: %1. Action: %2 (%3)")
+                            .arg(triggerSource, actionName, secondaryText));
+    emit statusTextReceived();
+    emit missionCompleted(actionName, secondaryText);
+
+    qDebug() << "[Drone" << m_sysId << "] Mission Completed fired via" << triggerSource
+             << "Action:" << actionName << "Secondary:" << secondaryText;
 }

@@ -280,3 +280,14 @@ void AudioAnnunciator::onMissionCleared()
 {
     say("Mission cleared. No active mission on board.", true);
 }
+
+void AudioAnnunciator::onMissionCompleted(const QString &secondaryText)
+{
+    QString textToSay = secondaryText.trimmed();
+    if (textToSay.isEmpty()) {
+        textToSay = "Mission completed.";
+    } else if (!textToSay.startsWith("Mission completed", Qt::CaseInsensitive)) {
+        textToSay = "Mission completed. " + textToSay;
+    }
+    say(textToSay, true);
+}
