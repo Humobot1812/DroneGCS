@@ -255,6 +255,11 @@ void AudioAnnunciator::onBatteryWarning(int percent)
     }
 }
 
+void AudioAnnunciator::onBatteryFailsafeRtl()
+{
+    say("Emergency! Critical low battery below ten percent. Initiating Return to Launch failsafe.", true);
+}
+
 void AudioAnnunciator::onGeofenceBreach()
 {
     qint64 now = QDateTime::currentMSecsSinceEpoch();

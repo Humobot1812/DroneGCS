@@ -79,6 +79,10 @@ class DroneVehicle : public QObject
     Q_PROPERTY(double distanceToHome READ distanceToHome NOTIFY distanceToHomeChanged)
     Q_PROPERTY(double safeReturnRadius READ safeReturnRadius NOTIFY safeReturnRadiusChanged)
 
+    // Safety & Failsafes
+    Q_PROPERTY(bool batteryFailsafeEnabled READ batteryFailsafeEnabled WRITE setBatteryFailsafeEnabled NOTIFY batteryFailsafeEnabledChanged)
+    Q_PROPERTY(bool batteryFailsafeTriggered READ isBatteryFailsafeTriggered NOTIFY batteryFailsafeTriggeredChanged)
+
     // Geofencing
     Q_PROPERTY(bool geofenceEnabled READ geofenceEnabled WRITE setGeofenceEnabled NOTIFY geofenceChanged)
     Q_PROPERTY(bool circularFenceEnabled READ circularFenceEnabled WRITE setCircularFenceEnabled NOTIFY circularFenceEnabledChanged)
@@ -143,6 +147,10 @@ public:
     double    homeAlt()         const { return m_homeAlt; }
     double    distanceToHome()  const { return m_distanceToHome; }
     double    safeReturnRadius() const { return m_safeReturnRadius; }
+
+    bool      batteryFailsafeEnabled() const { return m_batteryFailsafeEnabled; }
+    bool      isBatteryFailsafeTriggered() const { return m_batteryFailsafeTriggered; }
+    void      setBatteryFailsafeEnabled(bool enabled);
 
     bool      geofenceEnabled() const { return m_geofenceEnabled; }
     bool      circularFenceEnabled() const { return m_circularFenceEnabled; }
@@ -254,6 +262,9 @@ signals:
     void homePositionChanged();
     void distanceToHomeChanged();
     void safeReturnRadiusChanged();
+    void batteryFailsafeEnabledChanged();
+    void batteryFailsafeTriggeredChanged();
+    void batteryFailsafeTriggered();
     void geofenceChanged();
     void circularFenceEnabledChanged();
     void geofenceBreachedChanged();
@@ -280,6 +291,7 @@ private:
     void sendMissionClearAll();
     void handleMissionRequest(int seq, uint8_t missionType = 0);
     void checkGeofenceBreach();
+    void checkBatteryFailsafe();
     void updateDistancesAndReturnRadius();
     void sendMavlinkParam(const char *paramId, float value);
     void checkMissionCompletion(const QString &triggerSource);
@@ -333,6 +345,10 @@ private:
     double  m_homeLat = 0, m_homeLon = 0, m_homeAlt = 0;
     double  m_distanceToHome = 0.0;
     double  m_safeReturnRadius = 0.0;
+
+    // Battery Failsafe (<10% RTL)
+    bool    m_batteryFailsafeEnabled = true;
+    bool    m_batteryFailsafeTriggered = false;
 
     // Geofencing state
     bool    m_geofenceEnabled = false;

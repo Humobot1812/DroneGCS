@@ -61,6 +61,10 @@ int main(int argc, char *argv[])
             audioAnnunciator.onBatteryWarning(drone->batteryPercent());
         });
 
+        QObject::connect(drone, &DroneVehicle::batteryFailsafeTriggered, &audioAnnunciator, [&audioAnnunciator]() {
+            audioAnnunciator.onBatteryFailsafeRtl();
+        });
+
         QObject::connect(drone, &DroneVehicle::geofenceBreachedChanged, &audioAnnunciator, [drone, &audioAnnunciator]() {
             if (drone->geofenceBreached()) {
                 audioAnnunciator.onGeofenceBreach();

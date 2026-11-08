@@ -25,6 +25,10 @@ Dialog {
             appSettings.rtlAlt = rtlAltSpin.value;
             appSettings.sweepSpacing = sweepSpacingSpin.value;
             appSettings.autoDetectAutopilot = autoDetectSwitch.checked;
+            appSettings.batteryFailsafeEnabled = batteryFailsafeSwitch.checked;
+            if (typeof droneManager !== "undefined" && droneManager && droneManager.activeDrone) {
+                droneManager.activeDrone.batteryFailsafeEnabled = batteryFailsafeSwitch.checked;
+            }
             appSettings.voiceEnabled = voiceSwitch.checked;
             var selectedVoice = voiceProfileCombo.model.get(voiceProfileCombo.currentIndex).value;
             appSettings.maleVoiceProfile = selectedVoice;
@@ -128,6 +132,21 @@ Dialog {
                     Switch {
                         id: autoDetectSwitch
                         checked: (typeof appSettings !== "undefined") ? appSettings.autoDetectAutopilot : true
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Column {
+                        Layout.fillWidth: true
+                        Text { text: "Critical Battery Failsafe (<10% RTL)"; color: "#e6edf3"; font.pixelSize: 12; font.bold: true }
+                        Text { text: "Automatically initiate Return-To-Launch when battery drops below 10%"; color: "#7d8590"; font.pixelSize: 10 }
+                    }
+                    Switch {
+                        id: batteryFailsafeSwitch
+                        checked: (typeof droneManager !== "undefined" && droneManager && droneManager.activeDrone) ? droneManager.activeDrone.batteryFailsafeEnabled : ((typeof appSettings !== "undefined") ? appSettings.batteryFailsafeEnabled : true)
                     }
                 }
 

@@ -43,6 +43,7 @@ public:
     void onTakeoff();
     void onLanding();
     void onBatteryWarning(int percent);
+    void onBatteryFailsafeRtl();
     void onGeofenceBreach();
     void onGpsLost(const QString &droneName = QString());
     void onMissionUploaded(int count);

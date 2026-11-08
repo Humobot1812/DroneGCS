@@ -915,36 +915,45 @@ Rectangle {
         if (!drone || waypoints.length === 0) return;
         completionBanner.visible = false;
 
-        // Ensure final waypoint command matches selected post-mission action (20: RTL, 21: Land, 17: Hold, 16: Continue)
+        // Append post-mission action (20: RTL, 21: Land, 17: Hold) as a distinct extra waypoint after the last waypoint
         var actionKey = drone.postMissionAction || postMissionOptions[postMissionCombo.currentIndex].key;
-        var cmd = 16;
-        var lbl = "WAYPOINT";
-        if (actionKey === "RTL") {
-            cmd = 20;
-            lbl = "RETURN_TO_LAUNCH";
-        } else if (actionKey === "Land") {
-            cmd = 21;
-            lbl = "LAND";
-        } else if (actionKey === "Hold") {
-            cmd = 17;
-            lbl = "LOITER_UNLIM";
-        } else if (actionKey === "Continue") {
-            cmd = 16;
-            lbl = "CONTINUE";
-        }
-
         var uploadWps = waypoints.slice();
         var lastIdx = uploadWps.length - 1;
-        var lastWp = Object.assign({}, uploadWps[lastIdx]);
-        lastWp.command = cmd;
-        lastWp.label = lbl;
-        uploadWps[lastIdx] = lastWp;
-        waypoints = uploadWps;
-        waypointList.model = uploadWps;
+
+        if (actionKey === "RTL") {
+            var homeLat = (drone && drone.homeLat !== 0) ? drone.homeLat : uploadWps[lastIdx].lat;
+            var homeLon = (drone && drone.homeLon !== 0) ? drone.homeLon : uploadWps[lastIdx].lon;
+            uploadWps.push({
+                seq: uploadWps.length,
+                lat: homeLat,
+                lon: homeLon,
+                alt: 0,
+                command: 20,
+                label: "RETURN_TO_LAUNCH"
+            });
+        } else if (actionKey === "Land") {
+            uploadWps.push({
+                seq: uploadWps.length,
+                lat: uploadWps[lastIdx].lat,
+                lon: uploadWps[lastIdx].lon,
+                alt: 0,
+                command: 21,
+                label: "LAND"
+            });
+        } else if (actionKey === "Hold") {
+            uploadWps.push({
+                seq: uploadWps.length,
+                lat: uploadWps[lastIdx].lat,
+                lon: uploadWps[lastIdx].lon,
+                alt: uploadWps[lastIdx].alt,
+                command: 17,
+                label: "LOITER_UNLIM"
+            });
+        }
 
         // Direct C++ ACK-driven MAVLink upload pipeline
         drone.uploadWaypoints(uploadWps);
-        statusText.text = "Initiated ACK-based upload of " + uploadWps.length + " waypoints to " + drone.name + "...";
+        statusText.text = "Uploading " + uploadWps.length + " waypoints to " + drone.name + "...";
         statusText.color = "#00d4ff";
         statusContainer.borderColor = "#00d4ff";
     }

@@ -14,6 +14,7 @@ class AppSettings : public QObject
     Q_PROPERTY(bool    autoDetectAutopilot READ autoDetectAutopilot WRITE setAutoDetectAutopilot NOTIFY autoDetectAutopilotChanged)
     Q_PROPERTY(bool    voiceEnabled READ voiceEnabled WRITE setVoiceEnabled NOTIFY voiceEnabledChanged)
     Q_PROPERTY(QString maleVoiceProfile READ maleVoiceProfile WRITE setMaleVoiceProfile NOTIFY maleVoiceProfileChanged)
+    Q_PROPERTY(bool    batteryFailsafeEnabled READ batteryFailsafeEnabled WRITE setBatteryFailsafeEnabled NOTIFY batteryFailsafeEnabledChanged)
     Q_PROPERTY(double  geofenceDefaultRadius READ geofenceDefaultRadius WRITE setGeofenceDefaultRadius NOTIFY geofenceDefaultRadiusChanged)
     Q_PROPERTY(double  geofenceDefaultMaxAlt READ geofenceDefaultMaxAlt WRITE setGeofenceDefaultMaxAlt NOTIFY geofenceDefaultMaxAltChanged)
     Q_PROPERTY(int     geofenceDefaultAction READ geofenceDefaultAction WRITE setGeofenceDefaultAction NOTIFY geofenceDefaultActionChanged)
@@ -34,6 +35,7 @@ public:
     bool    autoDetectAutopilot() const;
     bool    voiceEnabled() const;
     QString maleVoiceProfile() const;
+    bool    batteryFailsafeEnabled() const;
     double  geofenceDefaultRadius() const;
     double  geofenceDefaultMaxAlt() const;
     int     geofenceDefaultAction() const;
@@ -50,6 +52,7 @@ public:
     void setAutoDetectAutopilot(bool v);
     void setVoiceEnabled(bool v);
     void setMaleVoiceProfile(const QString &v);
+    void setBatteryFailsafeEnabled(bool v);
     void setGeofenceDefaultRadius(double v);
     void setGeofenceDefaultMaxAlt(double v);
     void setGeofenceDefaultAction(int v);
@@ -69,6 +72,7 @@ signals:
     void autoDetectAutopilotChanged();
     void voiceEnabledChanged();
     void maleVoiceProfileChanged();
+    void batteryFailsafeEnabledChanged();
     void geofenceDefaultRadiusChanged();
     void geofenceDefaultMaxAltChanged();
     void geofenceDefaultActionChanged();

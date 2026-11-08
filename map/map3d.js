@@ -233,12 +233,18 @@ const droneEntity = viewer.entities.add({
         clampAnimations: true,
         shadows: Cesium.ShadowMode.DISABLED,
         heightReference: Cesium.HeightReference.NONE,
-        colorBlendMode: Cesium.ColorBlendMode.MIX,
-        colorBlendAmount: 0.7,
+        colorBlendMode: Cesium.ColorBlendMode.HIGHLIGHT,
+        silhouetteColor: new Cesium.CallbackProperty(function() {
+            if (lastDroneState.isStale) {
+                return Cesium.Color.ORANGE;
+            }
+            return Cesium.Color.fromCssColorString('#00D4FF');
+        }, false),
+        silhouetteSize: 2.0,
         color: new Cesium.CallbackProperty(function() {
             if (lastDroneState.isStale) {
                 // Amber/translucent warning shader or blend color (Section 13.D & Task 3)
-                return Cesium.Color.ORANGE.withAlpha(0.65);
+                return Cesium.Color.ORANGE.withAlpha(0.7);
             }
             return Cesium.Color.WHITE;
         }, false)

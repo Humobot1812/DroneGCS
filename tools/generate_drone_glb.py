@@ -59,15 +59,15 @@ def create_drone_model():
     """Build the tactical quadcopter multi-part mesh."""
     meshes = []
 
-    # Color definitions (RGBA uint8)
-    COLOR_TITANIUM   = [21, 32, 48, 255]     # Fuselage (#152030)
-    COLOR_CARBON     = [26, 30, 36, 255]     # Carbon arms (#1A1E24)
-    COLOR_MOTOR      = [43, 53, 69, 255]     # Motor housing (#2B3545)
-    COLOR_CYAN_ROTOR = [0, 212, 255, 210]    # Front rotors (#00D4FF)
-    COLOR_GRAY_ROTOR = [128, 144, 160, 210]  # Rear rotors (#8090A0)
-    COLOR_CHEVRON    = [0, 212, 255, 255]    # Directional nose arrow
-    COLOR_SKID       = [18, 22, 30, 255]     # Landing skids
-    COLOR_DOME       = [37, 48, 64, 255]     # GPS dome
+    # Color definitions (RGBA uint8) - High-contrast Tactical Stealth Dark
+    COLOR_TITANIUM   = [14, 18, 26, 255]     # Fuselage (#0E121A deep stealth dark)
+    COLOR_CARBON     = [10, 13, 18, 255]     # Carbon arms (#0A0D12)
+    COLOR_MOTOR      = [25, 30, 42, 255]     # Motor housing (#191E2A)
+    COLOR_CYAN_ROTOR = [0, 212, 255, 230]    # Front rotors (#00D4FF)
+    COLOR_GRAY_ROTOR = [40, 50, 65, 230]     # Rear rotors (#283241)
+    COLOR_CHEVRON    = [0, 212, 255, 255]    # Directional nose arrow (crisp cyan)
+    COLOR_SKID       = [8, 10, 14, 255]      # Landing skids
+    COLOR_DOME       = [20, 26, 38, 255]     # GPS dome
 
     # 1. Main Fuselage Body
     # In glTF 2.0: -Z is forward, +Y is up, +X is right

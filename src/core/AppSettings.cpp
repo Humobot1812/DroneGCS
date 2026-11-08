@@ -14,6 +14,7 @@ QString AppSettings::pythonPath()   const { return m_settings.value("python/path
 bool    AppSettings::autoDetectAutopilot() const { return m_settings.value("autopilot/autoDetect", true).toBool(); }
 bool    AppSettings::voiceEnabled() const { return m_settings.value("voice/enabled", true).toBool(); }
 QString AppSettings::maleVoiceProfile() const { return m_settings.value("voice/maleProfile", "male1").toString(); }
+bool    AppSettings::batteryFailsafeEnabled() const { return m_settings.value("safety/batteryFailsafeEnabled", true).toBool(); }
 double  AppSettings::geofenceDefaultRadius() const { return m_settings.value("geofence/radius", 300.0).toDouble(); }
 double  AppSettings::geofenceDefaultMaxAlt() const { return m_settings.value("geofence/maxAlt", 120.0).toDouble(); }
 int     AppSettings::geofenceDefaultAction() const { return m_settings.value("geofence/action", 1).toInt(); }
@@ -42,6 +43,7 @@ void AppSettings::setPythonPath(const QString &v)  { m_settings.setValue("python
 void AppSettings::setAutoDetectAutopilot(bool v)   { m_settings.setValue("autopilot/autoDetect", v);   emit autoDetectAutopilotChanged(); }
 void AppSettings::setVoiceEnabled(bool v)          { m_settings.setValue("voice/enabled", v);          emit voiceEnabledChanged(); }
 void AppSettings::setMaleVoiceProfile(const QString &v) { m_settings.setValue("voice/maleProfile", v); emit maleVoiceProfileChanged(); }
+void AppSettings::setBatteryFailsafeEnabled(bool v) { m_settings.setValue("safety/batteryFailsafeEnabled", v); emit batteryFailsafeEnabledChanged(); }
 void AppSettings::setGeofenceDefaultRadius(double v) { m_settings.setValue("geofence/radius", v);      emit geofenceDefaultRadiusChanged(); }
 void AppSettings::setGeofenceDefaultMaxAlt(double v) { m_settings.setValue("geofence/maxAlt", v);      emit geofenceDefaultMaxAltChanged(); }
 void AppSettings::setGeofenceDefaultAction(int v)  { m_settings.setValue("geofence/action", v);      emit geofenceDefaultActionChanged(); }
@@ -72,6 +74,7 @@ void AppSettings::reset()
     emit autoDetectAutopilotChanged();
     emit voiceEnabledChanged();
     emit maleVoiceProfileChanged();
+    emit batteryFailsafeEnabledChanged();
     emit geofenceDefaultRadiusChanged();
     emit geofenceDefaultMaxAltChanged();
     emit geofenceDefaultActionChanged();

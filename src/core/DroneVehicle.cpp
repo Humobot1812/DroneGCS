@@ -286,6 +286,7 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
                 m_batteryVoltage = sys.voltage_battery / 1000.0;
                 emit batteryChanged();
                 updateDistancesAndReturnRadius();
+                checkBatteryFailsafe();
                 break;
             }
             case MAVLINK_MSG_ID_GPS_RAW_INT: {
@@ -732,8 +733,7 @@ void DroneVehicle::processPacket(const QByteArray &rawPacket)
                     emit missionProgressChanged();
                     emit missionUploadComplete(true);
 
-                    m_lastStatusText = QString("[%1] Mission Upload Succeeded (%2 waypoints)")
-                                           .arg(m_name).arg(m_pendingWaypoints.size());
+                    m_lastStatusText = QString("[%1] Mission uploaded. Ready for AUTO mode.").arg(m_name);
                     addFlightLog("NAV", QString("Mission upload accepted by vehicle (%1 waypoints)").arg(m_pendingWaypoints.size()));
                     emit statusTextReceived();
 
@@ -1180,30 +1180,42 @@ void DroneVehicle::uploadWaypoints(const QVariantList &waypoints)
     m_missionCompletedFired = false;
     m_pendingWaypoints = waypoints;
 
-    // Harmonize post-mission action with pending waypoints
+    // Ensure all user-created waypoints default to MAV_CMD_NAV_WAYPOINT if command unspecified
+    for (int i = 0; i < m_pendingWaypoints.size(); ++i) {
+        QVariantMap wp = m_pendingWaypoints[i].toMap();
+        if (!wp.contains("command") || wp.value("command").toUInt() == 0) {
+            wp["command"] = static_cast<uint16_t>(MAV_CMD_NAV_WAYPOINT);
+            m_pendingWaypoints[i] = wp;
+        }
+    }
+
+    // Append post-mission action (RTL, Land, Hold) as a distinct extra waypoint AFTER all user waypoints
     if (!m_pendingWaypoints.isEmpty()) {
         QVariantMap lastWp = m_pendingWaypoints.last().toMap();
-        if (lastWp.contains("command")) {
-            uint16_t lastCmd = static_cast<uint16_t>(lastWp.value("command").toUInt());
-            QString detectedAction = "Continue";
-            if (lastCmd == MAV_CMD_NAV_RETURN_TO_LAUNCH) detectedAction = "RTL";
-            else if (lastCmd == MAV_CMD_NAV_LAND) detectedAction = "Land";
-            else if (lastCmd == MAV_CMD_NAV_LOITER_UNLIM ||
-                     lastCmd == MAV_CMD_NAV_LOITER_TIME ||
-                     lastCmd == MAV_CMD_NAV_LOITER_TURNS) detectedAction = "Hold";
-            else detectedAction = "Continue";
+        uint16_t lastCmd = static_cast<uint16_t>(lastWp.value("command").toUInt());
 
-            if (m_postMissionAction != detectedAction) {
-                m_postMissionAction = detectedAction;
-                emit postMissionActionChanged();
-            }
-        } else {
-            uint16_t injectCmd = MAV_CMD_NAV_WAYPOINT;
-            if (m_postMissionAction == "RTL") injectCmd = MAV_CMD_NAV_RETURN_TO_LAUNCH;
-            else if (m_postMissionAction == "Land") injectCmd = MAV_CMD_NAV_LAND;
-            else if (m_postMissionAction == "Hold") injectCmd = MAV_CMD_NAV_LOITER_UNLIM;
-            lastWp["command"] = injectCmd;
-            m_pendingWaypoints[m_pendingWaypoints.size() - 1] = lastWp;
+        if (m_postMissionAction == "RTL" && lastCmd != MAV_CMD_NAV_RETURN_TO_LAUNCH) {
+            QVariantMap rtlWp;
+            rtlWp["lat"] = m_homeLat != 0 ? m_homeLat : lastWp.value("lat").toDouble();
+            rtlWp["lon"] = m_homeLon != 0 ? m_homeLon : lastWp.value("lon").toDouble();
+            rtlWp["alt"] = 0.0;
+            rtlWp["command"] = static_cast<uint16_t>(MAV_CMD_NAV_RETURN_TO_LAUNCH);
+            rtlWp["label"] = "RETURN_TO_LAUNCH";
+            m_pendingWaypoints.append(rtlWp);
+            qDebug() << "[Drone" << m_sysId << "] Appended post-mission RTL waypoint after" << (m_pendingWaypoints.size() - 1) << "waypoints";
+        } else if (m_postMissionAction == "Land" && lastCmd != MAV_CMD_NAV_LAND) {
+            QVariantMap landWp = lastWp;
+            landWp["alt"] = 0.0;
+            landWp["command"] = static_cast<uint16_t>(MAV_CMD_NAV_LAND);
+            landWp["label"] = "LAND";
+            m_pendingWaypoints.append(landWp);
+            qDebug() << "[Drone" << m_sysId << "] Appended post-mission LAND waypoint after" << (m_pendingWaypoints.size() - 1) << "waypoints";
+        } else if (m_postMissionAction == "Hold" && lastCmd != MAV_CMD_NAV_LOITER_UNLIM && lastCmd != MAV_CMD_NAV_LOITER_TIME) {
+            QVariantMap holdWp = lastWp;
+            holdWp["command"] = static_cast<uint16_t>(MAV_CMD_NAV_LOITER_UNLIM);
+            holdWp["label"] = "LOITER_UNLIM";
+            m_pendingWaypoints.append(holdWp);
+            qDebug() << "[Drone" << m_sysId << "] Appended post-mission HOLD waypoint after" << (m_pendingWaypoints.size() - 1) << "waypoints";
         }
     }
 
@@ -1857,6 +1869,7 @@ void DroneVehicle::updateSimulatedTelemetry(double lat, double lon, double alt, 
 
     updateDistancesAndReturnRadius();
     checkGeofenceBreach();
+    checkBatteryFailsafe();
 }
 
 void DroneVehicle::addFlightLog(const QString &level, const QString &message)
@@ -2223,4 +2236,43 @@ void DroneVehicle::checkMissionCompletion(const QString &triggerSource)
 
     qDebug() << "[Drone" << m_sysId << "] Mission Completed fired via" << triggerSource
              << "Action:" << actionName << "Secondary:" << secondaryText;
+}
+
+void DroneVehicle::setBatteryFailsafeEnabled(bool enabled)
+{
+    if (m_batteryFailsafeEnabled != enabled) {
+        m_batteryFailsafeEnabled = enabled;
+        emit batteryFailsafeEnabledChanged();
+        qDebug() << "[Drone" << m_sysId << "] Critical battery failsafe (<10% RTL) set to:" << (enabled ? "ENABLED" : "DISABLED");
+        if (m_batteryFailsafeEnabled) {
+            checkBatteryFailsafe();
+        }
+    }
+}
+
+void DroneVehicle::checkBatteryFailsafe()
+{
+    if (!m_batteryFailsafeEnabled) return;
+
+    if (m_connected && m_armed && m_batteryPercent > 0 && m_batteryPercent < 10) {
+        if (!m_batteryFailsafeTriggered) {
+            m_batteryFailsafeTriggered = true;
+            emit batteryFailsafeTriggeredChanged();
+            emit batteryFailsafeTriggered();
+
+            qWarning() << "[Drone" << m_sysId << "] 🚨 CRITICAL BATTERY FAILSAFE TRIGGERED ("
+                       << m_batteryPercent << "% < 10%). Returning to Launch (RTL).";
+
+            m_lastStatusText = QString("[%1] 🚨 BATTERY FAILSAFE (<10%): Initiated RTL").arg(m_name);
+            addFlightLog("CRIT", QString("Battery dropped to %1% (<10%). Automated RTL failsafe triggered.").arg(m_batteryPercent));
+            emit statusTextReceived();
+
+            returnToLaunch();
+        }
+    } else if (m_batteryPercent >= 15) {
+        if (m_batteryFailsafeTriggered) {
+            m_batteryFailsafeTriggered = false;
+            emit batteryFailsafeTriggeredChanged();
+        }
+    }
 }

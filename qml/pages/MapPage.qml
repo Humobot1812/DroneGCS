@@ -188,6 +188,17 @@ Rectangle {
                 mapView3D.runJavaScript("setMissionProgress(" + drone.missionCurrent + "," + drone.missionTotal + ");");
             }
         }
+        function onMissionUploadComplete(success) {
+            if (success) {
+                wpUploadStatus.text = "✅ Mission uploaded. Ready for AUTO mode.";
+                wpUploadStatus.color = "#3fb950";
+                wpUploadStatus.visible = true;
+                wpStatusTimer.restart();
+                if (typeof audioAnnunciator !== "undefined") {
+                    audioAnnunciator.say("Mission uploaded. Ready for auto mode.", true);
+                }
+            }
+        }
     }
 
     function connectDroneToMap(drone) {
@@ -786,10 +797,13 @@ Rectangle {
                                 var wps = JSON.parse(result);
                                 if (drone) {
                                     drone.uploadWaypoints(wps);
-                                    wpUploadStatus.text = "✅ Uploaded " + wps.length + " waypoints!";
+                                    wpUploadStatus.text = "✅ Mission uploaded. Ready for AUTO mode.";
                                     wpUploadStatus.color = "#3fb950";
                                     wpUploadStatus.visible = true;
                                     wpStatusTimer.restart();
+                                    if (typeof audioAnnunciator !== "undefined") {
+                                        audioAnnunciator.say("Mission uploaded. Ready for auto mode.", true);
+                                    }
                                 }
                             });
                         }
@@ -1441,6 +1455,32 @@ Rectangle {
                                     color: "#8b949e"; font.pixelSize: 12
                                     font.family: "JetBrains Mono, monospace"
                                     anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+                            // Quick toggle for <10% RTL battery failsafe
+                            Rectangle {
+                                width: failsafeTxt.implicitWidth + 8; height: 16; radius: 3
+                                color: (drone && drone.batteryFailsafeEnabled) ? "#00d4ff20" : "#21262d"
+                                border.color: (drone && drone.batteryFailsafeEnabled) ? "#00d4ff" : "#30363d"
+                                border.width: 1
+                                Text {
+                                    id: failsafeTxt
+                                    anchors.centerIn: parent
+                                    text: "FAILSAFE: " + (drone && drone.batteryFailsafeEnabled ? "RTL ON" : "OFF")
+                                    font.pixelSize: 8; font.bold: true
+                                    font.family: "JetBrains Mono, monospace"
+                                    color: (drone && drone.batteryFailsafeEnabled) ? "#00d4ff" : "#8b949e"
+                                }
+                                MouseArea {
+                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (drone) {
+                                            drone.batteryFailsafeEnabled = !drone.batteryFailsafeEnabled;
+                                            if (typeof appSettings !== "undefined") {
+                                                appSettings.batteryFailsafeEnabled = drone.batteryFailsafeEnabled;
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
