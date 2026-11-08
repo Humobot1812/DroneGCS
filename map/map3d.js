@@ -604,10 +604,13 @@ function updateDroneMarker(sysId, lat, lon, heading, color, name) {
 // ── 3D Mission & Geofence Geospatial Visualization ────────────────────────
 let waypointEntities = [];
 let plannedMissionPolylineEntity = null;
+let missionSegmentEntities = [];
 let geofenceEntities = [];
 let geofenceCircleEntity = null;
 let batteryRthEntity = null;
 let activeHighlightedWaypointIndex = -1;
+let currentMissionSeq = 0;
+let currentMissionTotal = 0;
 
 function setWaypoints(wps) {
     setWaypoints3D(wps);
@@ -617,8 +620,6 @@ function setWaypoints3D(wps) {
     clearWaypoints();
     missionWaypointsList = Array.isArray(wps) ? wps : [];
     if (missionWaypointsList.length === 0) return;
-
-    const plannedPositions = [];
 
     missionWaypointsList.forEach(function(wp, i) {
         const numLat = parseFloat(wp.lat);
@@ -630,7 +631,23 @@ function setWaypoints3D(wps) {
         const wpPos = Cesium.Cartesian3.fromDegrees(numLon, numLat, altRes.visualAlt);
         const groundPos = Cesium.Cartesian3.fromDegrees(numLon, numLat, altRes.groundHeight);
 
-        plannedPositions.push(wpPos);
+        // Determine waypoint command type (TAKEOFF, LAND, RTL, LOITER, WAYPOINT)
+        let labelText = `WP ${i + 1} (${wpAltRel.toFixed(0)}m)`;
+        let pointColor = Cesium.Color.fromCssColorString('#00D4FF');
+        const cmd = parseInt(wp.command, 10);
+        if (cmd === 22 || wp.type === 'TAKEOFF') {
+            labelText = `🛫 TAKEOFF (${wpAltRel.toFixed(0)}m)`;
+            pointColor = Cesium.Color.fromCssColorString('#3FB950');
+        } else if (cmd === 21 || wp.type === 'LAND') {
+            labelText = `🛬 LAND (${wpAltRel.toFixed(0)}m)`;
+            pointColor = Cesium.Color.fromCssColorString('#D29922');
+        } else if (cmd === 20 || wp.type === 'RTL') {
+            labelText = `🏠 RTL`;
+            pointColor = Cesium.Color.fromCssColorString('#A371F7');
+        } else if ((cmd >= 17 && cmd <= 19) || wp.type === 'LOITER') {
+            labelText = `⏳ LOITER (${wpAltRel.toFixed(0)}m)`;
+            pointColor = Cesium.Color.fromCssColorString('#F0883E');
+        }
 
         // 1. Vertical ground drop line (dashed pillar)
         const stemEntity = viewer.entities.add({
@@ -639,7 +656,7 @@ function setWaypoints3D(wps) {
                 positions: [wpPos, groundPos],
                 width: 1.5,
                 material: new Cesium.PolylineDashMaterialProperty({
-                    color: Cesium.Color.fromCssColorString('#00D4FF').withAlpha(0.6),
+                    color: pointColor.withAlpha(0.6),
                     gapColor: Cesium.Color.TRANSPARENT,
                     dashLength: 6.0
                 })
@@ -653,7 +670,7 @@ function setWaypoints3D(wps) {
             position: groundPos,
             point: {
                 pixelSize: 6,
-                color: Cesium.Color.fromCssColorString('#00D4FF').withAlpha(0.8),
+                color: pointColor.withAlpha(0.8),
                 outlineColor: Cesium.Color.fromCssColorString('#090D14'),
                 outlineWidth: 1.5
             }
@@ -666,13 +683,13 @@ function setWaypoints3D(wps) {
             position: wpPos,
             point: {
                 pixelSize: 12,
-                color: Cesium.Color.fromCssColorString('#00D4FF'),
+                color: pointColor,
                 outlineColor: Cesium.Color.WHITE,
                 outlineWidth: 2,
                 disableDepthTestDistance: Number.POSITIVE_INFINITY
             },
             label: {
-                text: `WP ${i + 1} (${wpAltRel.toFixed(0)}m)`,
+                text: labelText,
                 font: 'bold 11px JetBrains Mono, monospace',
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE,
                 fillColor: Cesium.Color.WHITE,
@@ -686,23 +703,94 @@ function setWaypoints3D(wps) {
         waypointEntities.push(wpEntity);
     });
 
-    // 4. 3D Planned Mission Flight Path (Polyline connecting waypoints at flight altitude)
-    if (plannedPositions.length >= 2) {
-        plannedMissionPolylineEntity = viewer.entities.add({
-            name: "Planned Mission Flight Path",
+    // 4. Render differentiated 3D mission flight segments
+    renderMissionSegments();
+
+    console.log(`3D Waypoints rendered. Count: ${missionWaypointsList.length}`);
+}
+
+function renderMissionSegments() {
+    missionSegmentEntities.forEach(function(ent) {
+        viewer.entities.remove(ent);
+    });
+    missionSegmentEntities = [];
+
+    if (!missionWaypointsList || missionWaypointsList.length < 2) return;
+
+    for (let i = 0; i < missionWaypointsList.length - 1; i++) {
+        const wp1 = missionWaypointsList[i];
+        const wp2 = missionWaypointsList[i + 1];
+
+        const numLat1 = parseFloat(wp1.lat);
+        const numLon1 = parseFloat(wp1.lon);
+        const numLat2 = parseFloat(wp2.lat);
+        const numLon2 = parseFloat(wp2.lon);
+        if (!Number.isFinite(numLat1) || !Number.isFinite(numLon1) || !Number.isFinite(numLat2) || !Number.isFinite(numLon2)) continue;
+
+        const alt1 = computeCalibratedAltitude(numLon1, numLat1, 0, wp1.alt || 15).visualAlt;
+        const alt2 = computeCalibratedAltitude(numLon2, numLat2, 0, wp2.alt || 15).visualAlt;
+
+        const p1 = Cesium.Cartesian3.fromDegrees(numLon1, numLat1, alt1);
+        const p2 = Cesium.Cartesian3.fromDegrees(numLon2, numLat2, alt2);
+
+        const isCompleted = currentMissionSeq > 0 && (i + 2) <= currentMissionSeq;
+        const isActive = currentMissionSeq > 0 && (i + 1) === currentMissionSeq;
+
+        let segColor = '#00D4FF';
+        let segWidth = 3.0;
+        let isGlow = false;
+
+        if (isCompleted) {
+            segColor = '#3FB950'; // Completed segment: green
+            segWidth = 2.0;
+        } else if (isActive) {
+            segColor = '#FFB300'; // Active segment: bright glowing gold
+            segWidth = 4.0;
+            isGlow = true;
+        }
+
+        const segEntity = viewer.entities.add({
+            name: `Mission Leg ${i + 1}->${i + 2}`,
             polyline: {
-                positions: plannedPositions,
-                width: 3.5,
-                material: new Cesium.PolylineGlowMaterialProperty({
-                    glowPower: 0.25,
+                positions: [p1, p2],
+                width: segWidth,
+                material: isGlow ? new Cesium.PolylineGlowMaterialProperty({
+                    glowPower: 0.35,
                     taperPower: 1.0,
-                    color: Cesium.Color.fromCssColorString('#00D4FF').withAlpha(0.9)
-                })
+                    color: Cesium.Color.fromCssColorString(segColor)
+                }) : Cesium.Color.fromCssColorString(segColor).withAlpha(0.85)
+            }
+        });
+        missionSegmentEntities.push(segEntity);
+    }
+}
+
+function setMissionProgress(currentSeq, totalCount) {
+    currentMissionSeq = parseInt(currentSeq, 10) || 0;
+    currentMissionTotal = parseInt(totalCount, 10) || 0;
+
+    // Update waypoint pins
+    if (missionWaypointsList && missionWaypointsList.length > 0) {
+        missionWaypointsList.forEach(function(wp, i) {
+            const ent = waypointEntities.find(e => e.name === `WP ${i + 1}`);
+            if (!ent || !ent.point) return;
+
+            if (currentMissionSeq > 0 && (i + 1) < currentMissionSeq) {
+                ent.point.color = Cesium.Color.fromCssColorString('#3FB950').withAlpha(0.7);
+                ent.point.pixelSize = 10;
+            } else if (currentMissionSeq > 0 && (i + 1) === currentMissionSeq) {
+                ent.point.color = Cesium.Color.fromCssColorString('#FFB300');
+                ent.point.pixelSize = 16;
+                ent.point.outlineColor = Cesium.Color.WHITE;
+                ent.point.outlineWidth = 3;
+            } else {
+                ent.point.color = Cesium.Color.fromCssColorString('#00D4FF');
+                ent.point.pixelSize = 12;
             }
         });
     }
 
-    console.log(`3D Waypoints rendered. Count: ${missionWaypointsList.length}`);
+    renderMissionSegments();
 }
 
 function highlightWaypoint(index) {
@@ -1074,6 +1162,7 @@ if (typeof window !== 'undefined') {
     window.updateDrone3D = updateDrone3D;
     window.set3DBuildingsVisible = set3DBuildingsVisible;
     window.setMapProvider = setMapProvider;
+    window.setMissionProgress = setMissionProgress;
 }
 
 // Initial HUD formatting

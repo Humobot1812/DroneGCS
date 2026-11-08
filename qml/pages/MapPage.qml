@@ -183,6 +183,11 @@ Rectangle {
                 mapView3D.runJavaScript("setHomePosition(" + drone.homeLat + "," + drone.homeLon + "," + drone.homeAlt + ");");
             }
         }
+        function onMissionProgressChanged() {
+            if (drone) {
+                mapView3D.runJavaScript("setMissionProgress(" + drone.missionCurrent + "," + drone.missionTotal + ");");
+            }
+        }
     }
 
     function connectDroneToMap(drone) {
@@ -210,6 +215,11 @@ Rectangle {
         });
         drone.connectionChanged.connect(function() {
             if (root.is3DMode) syncDroneTo3D(drone);
+        });
+        drone.missionProgressChanged.connect(function() {
+            if (root.is3DMode) {
+                mapView3D.runJavaScript("setMissionProgress(" + drone.missionCurrent + "," + drone.missionTotal + ");");
+            }
         });
     }
 
