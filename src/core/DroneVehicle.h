@@ -221,6 +221,7 @@ public:
 
     Q_INVOKABLE void requestAllParameters();
     Q_INVOKABLE void setParam(const QString &paramName, float value);
+    Q_INVOKABLE void setParamWithType(const QString &paramName, float value, int paramType = 9);
     Q_INVOKABLE void fetchGeofenceFromDrone();
     Q_INVOKABLE void downloadMission();
 
@@ -293,7 +294,7 @@ private:
     void checkGeofenceBreach();
     void checkBatteryFailsafe();
     void updateDistancesAndReturnRadius();
-    void sendMavlinkParam(const char *paramId, float value);
+    void sendMavlinkParam(const char *paramId, float value, uint8_t paramType = 9);
     void checkMissionCompletion(const QString &triggerSource);
     bool isMissionAutoMode(const QString &mode) const;
 

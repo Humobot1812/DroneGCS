@@ -861,7 +861,7 @@ QByteArray DroneVehicle::buildCommandLong(uint16_t cmd,
     return QByteArray(reinterpret_cast<char*>(buf), len);
 }
 
-void DroneVehicle::sendMavlinkParam(const char *paramId, float value)
+void DroneVehicle::sendMavlinkParam(const char *paramId, float value, uint8_t paramType)
 {
     mavlink_message_t msg;
     uint8_t buf[MAVLINK_MAX_PACKET_LEN];
@@ -871,7 +871,7 @@ void DroneVehicle::sendMavlinkParam(const char *paramId, float value)
     mavlink_msg_param_set_pack(
         k_gcsSystemId, k_gcsCompId, &msg,
         m_sysId, MAV_COMP_ID_AUTOPILOT1,
-        idBuf, value, MAV_PARAM_TYPE_REAL32);
+        idBuf, value, paramType);
 
     int len = mavlink_msg_to_send_buffer(buf, &msg);
     emit sendBytes(QByteArray(reinterpret_cast<char*>(buf), len));
@@ -2081,7 +2081,12 @@ void DroneVehicle::requestAllParameters()
 
 void DroneVehicle::setParam(const QString &paramName, float value)
 {
-    sendMavlinkParam(paramName.toLatin1().constData(), value);
+    setParamWithType(paramName, value, MAV_PARAM_TYPE_REAL32);
+}
+
+void DroneVehicle::setParamWithType(const QString &paramName, float value, int paramType)
+{
+    sendMavlinkParam(paramName.toLatin1().constData(), value, static_cast<uint8_t>(paramType));
     m_paramValues[paramName] = value;
     m_parameters[paramName] = value;
     emit parametersChanged();

@@ -9,6 +9,9 @@ Rectangle {
     color: "#0d1117"
 
     property var drone: droneManager.activeDrone
+    property int dirtyCount: 0
+    property bool bannerVisible: false
+    property bool bannerSuccess: true
 
     // Param model (filled from MAVLink PARAM_VALUE messages)
     ListModel { id: paramModel }
@@ -30,6 +33,7 @@ Rectangle {
         // Header & Quick Action Bar
         RowLayout {
             Layout.fillWidth: true
+            spacing: 10
 
             Row {
                 spacing: 8
@@ -78,6 +82,71 @@ Rectangle {
 
             Item { Layout.fillWidth: true }
 
+            // ── Primary Action: Upload New Parameter Directly ──
+            Button {
+                id: uploadNewBtn
+                Layout.preferredHeight: 32
+                font.pixelSize: 11
+                font.bold: true
+                Material.background: "#1f6feb"
+                contentItem: Row {
+                    spacing: 6
+                    anchors.centerIn: parent
+                    Text {
+                        text: "＋"
+                        color: "#ffffff"
+                        font.pixelSize: 13
+                        font.bold: true
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {
+                        text: "Upload New Param"
+                        color: "#ffffff"
+                        font.pixelSize: 11
+                        font.bold: true
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+                ToolTip.visible: hovered
+                ToolTip.text: "Directly inject and upload a new or custom parameter to the drone autopilot"
+                onClicked: {
+                    uploadParamDialog.openDialog();
+                }
+            }
+
+            // ── Upload Modified Parameters (Visible when modified) ──
+            Button {
+                id: uploadModifiedBtn
+                visible: dirtyCount > 0
+                Layout.preferredHeight: 32
+                font.pixelSize: 11
+                font.bold: true
+                Material.background: "#238636"
+                contentItem: Row {
+                    spacing: 6
+                    anchors.centerIn: parent
+                    Text {
+                        text: "⬆"
+                        color: "#ffffff"
+                        font.pixelSize: 12
+                        font.bold: true
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {
+                        text: "Upload Modified (" + dirtyCount + ")"
+                        color: "#ffffff"
+                        font.pixelSize: 11
+                        font.bold: true
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+                ToolTip.visible: hovered
+                ToolTip.text: "Transmit all pending modified parameters directly to vehicle"
+                onClicked: {
+                    uploadAllModified();
+                }
+            }
+
             // Refresh Parameters Button
             Button {
                 text: "🔄 Sync From Drone"
@@ -92,6 +161,8 @@ Rectangle {
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }
+                ToolTip.visible: hovered
+                ToolTip.text: "Request complete onboard parameter tree via MAVLink PARAM_REQUEST_LIST"
                 onClicked: {
                     if (drone) {
                         statusLabel.text = "Requesting complete parameter tree from drone SYS:" + drone.sysId + "...";
@@ -104,7 +175,7 @@ Rectangle {
 
             // Search Box
             Rectangle {
-                width: 240
+                width: 200
                 height: 32
                 radius: 5
                 color: "#161b22"
@@ -132,6 +203,61 @@ Rectangle {
                     }
                 }
             }
+        }
+
+        // ── Direct Notification Banner ────────────────────────────────────────
+        Rectangle {
+            id: notificationBanner
+            Layout.fillWidth: true
+            height: bannerVisible ? 36 : 0
+            visible: height > 0
+            clip: true
+            color: bannerSuccess ? "#122a1b" : "#381a1a"
+            border.color: bannerSuccess ? "#3fb950" : "#f85149"
+            border.width: 1
+            radius: 6
+
+            Behavior on height { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                spacing: 10
+
+                Text {
+                    text: bannerSuccess ? "✓" : "⚠"
+                    font.pixelSize: 13
+                    font.bold: true
+                    color: bannerSuccess ? "#3fb950" : "#f85149"
+                }
+                Text {
+                    id: bannerText
+                    text: ""
+                    font.pixelSize: 11
+                    font.bold: true
+                    color: "#e6edf3"
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
+                }
+                Text {
+                    text: "✕"
+                    font.pixelSize: 12
+                    color: "#8b949e"
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: bannerVisible = false
+                    }
+                }
+            }
+        }
+
+        Timer {
+            id: bannerTimer
+            interval: 4500
+            repeat: false
+            onTriggered: bannerVisible = false
         }
 
         // ── Quick Flight Tuning Panel (PX4 + ArduPilot Unified) ────────────────
@@ -295,10 +421,12 @@ Rectangle {
 
             RowLayout {
                 anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
-                Text { text: "PARAMETER NAME"; color: "#7d8590"; font.pixelSize: 10; font.bold: true; Layout.preferredWidth: 220 }
-                Text { text: "VALUE"; color: "#7d8590"; font.pixelSize: 10; font.bold: true; Layout.preferredWidth: 140 }
-                Text { text: "TYPE"; color: "#7d8590"; font.pixelSize: 10; font.bold: true; Layout.preferredWidth: 90 }
+                spacing: 12
+                Text { text: "PARAMETER NAME"; color: "#7d8590"; font.pixelSize: 10; font.bold: true; Layout.preferredWidth: 200 }
+                Text { text: "VALUE"; color: "#7d8590"; font.pixelSize: 10; font.bold: true; Layout.preferredWidth: 130 }
+                Text { text: "TYPE"; color: "#7d8590"; font.pixelSize: 10; font.bold: true; Layout.preferredWidth: 80 }
                 Text { text: "DESCRIPTION / CONTEXT"; color: "#7d8590"; font.pixelSize: 10; font.bold: true; Layout.fillWidth: true }
+                Text { text: "ACTION"; color: "#7d8590"; font.pixelSize: 10; font.bold: true; Layout.preferredWidth: 90; horizontalAlignment: Text.AlignHCenter }
             }
         }
 
@@ -326,7 +454,7 @@ Rectangle {
                     anchors.horizontalCenter: parent.horizontalCenter
                 }
                 Text {
-                    text: "Connect to a vehicle or click 'Sync From Drone' to fetch all onboard parameters"
+                    text: "Click '+ Upload New Param' to send a parameter or 'Sync From Drone' to fetch all"
                     font.pixelSize: 11
                     color: "#484f58"
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -344,9 +472,12 @@ Rectangle {
             visible: paramModel.count > 0
 
             delegate: Rectangle {
+                id: rowDelegate
                 width: paramListView.width
                 height: 38
-                color: index % 2 === 0 ? "#0d1117" : "#13171f"
+                color: model.dirty ? "#1e1b10" : (index % 2 === 0 ? "#0d1117" : "#13171f")
+                border.color: model.dirty ? "#d29922" : "transparent"
+                border.width: model.dirty ? 1 : 0
 
                 property bool editing: false
 
@@ -355,46 +486,91 @@ Rectangle {
                     spacing: 12
 
                     // Name
-                    Text {
-                        text: model.name
-                        font.pixelSize: 12
-                        font.family: "JetBrains Mono, monospace"
-                        color: model.dirty ? "#d29922" : "#e6edf3"
-                        Layout.preferredWidth: 220
+                    Row {
+                        Layout.preferredWidth: 200
+                        spacing: 6
+                        Text {
+                            text: model.name
+                            font.pixelSize: 12
+                            font.bold: model.dirty
+                            font.family: "JetBrains Mono, monospace"
+                            color: model.dirty ? "#d29922" : "#e6edf3"
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Rectangle {
+                            height: 16
+                            width: 52
+                            radius: 3
+                            color: "#3e2e12"
+                            border.color: "#d29922"
+                            border.width: 1
+                            visible: model.dirty
+                            anchors.verticalCenter: parent.verticalCenter
+                            Text {
+                                text: "MODIFIED"
+                                font.pixelSize: 8
+                                font.bold: true
+                                color: "#d29922"
+                                anchors.centerIn: parent
+                            }
+                        }
                     }
 
                     // Value (click to edit)
                     Rectangle {
-                        Layout.preferredWidth: 140
+                        Layout.preferredWidth: 130
                         height: 26
                         radius: 4
-                        color: editing ? "#21262d" : "transparent"
-                        border.color: editing ? "#00d4ff" : "transparent"
+                        color: editing ? "#21262d" : (model.dirty ? "#2a2412" : "transparent")
+                        border.color: editing ? "#00d4ff" : (model.dirty ? "#d29922" : "transparent")
                         border.width: 1
 
                         TextInput {
                             id: valueInput
                             anchors { fill: parent; leftMargin: 6; rightMargin: 6 }
                             text: model.value
-                            color: "#00d4ff"
+                            color: model.dirty ? "#f0883e" : "#00d4ff"
                             font.pixelSize: 12
+                            font.bold: true
                             font.family: "JetBrains Mono, monospace"
                             verticalAlignment: TextInput.AlignVCenter
                             readOnly: !editing
+                            selectByMouse: true
                             Keys.onReturnPressed: {
-                                applyParam(model.name, text);
-                                editing = false;
+                                var val = text.trim();
+                                var floatVal = parseFloat(val);
+                                if (!isNaN(floatVal)) {
+                                    paramModel.setProperty(index, "value", val);
+                                    editing = false;
+                                    uploadSingleParam(index);
+                                }
                             }
                             Keys.onEscapePressed: {
                                 text = model.value;
                                 editing = false;
+                            }
+                            onEditingFinished: {
+                                if (editing) {
+                                    var val = text.trim();
+                                    if (val !== model.value) {
+                                        paramModel.setProperty(index, "value", val);
+                                        paramModel.setProperty(index, "dirty", true);
+                                        updateDirtyCount();
+                                    }
+                                    editing = false;
+                                }
                             }
                         }
 
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.IBeamCursor
-                            onDoubleClicked: { editing = true; valueInput.forceActiveFocus(); valueInput.selectAll() }
+                            visible: !editing
+                            onDoubleClicked: {
+                                editing = true;
+                                valueInput.forceActiveFocus();
+                                valueInput.selectAll();
+                            }
                         }
                     }
 
@@ -404,7 +580,7 @@ Rectangle {
                         font.pixelSize: 10
                         font.family: "JetBrains Mono, monospace"
                         color: "#7d8590"
-                        Layout.preferredWidth: 90
+                        Layout.preferredWidth: 80
                     }
 
                     // Description
@@ -414,6 +590,43 @@ Rectangle {
                         color: "#7d8590"
                         Layout.fillWidth: true
                         elide: Text.ElideRight
+                    }
+
+                    // Direct Upload Action Button per Row
+                    Item {
+                        Layout.preferredWidth: 90
+                        Layout.preferredHeight: 26
+
+                        Button {
+                            anchors.centerIn: parent
+                            width: 82
+                            height: 24
+                            font.pixelSize: 10
+                            font.bold: true
+                            Material.background: model.dirty ? "#238636" : "#21262d"
+                            contentItem: Row {
+                                spacing: 4
+                                anchors.centerIn: parent
+                                Text {
+                                    text: "⬆"
+                                    color: model.dirty ? "#ffffff" : "#00d4ff"
+                                    font.pixelSize: 10
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Text {
+                                    text: model.dirty ? "Upload" : "Write"
+                                    color: model.dirty ? "#ffffff" : "#00d4ff"
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Upload " + model.name + " (" + model.value + ") directly to drone memory"
+                            onClicked: {
+                                uploadSingleParam(index);
+                            }
+                        }
                     }
                 }
             }
@@ -426,6 +639,462 @@ Rectangle {
             color: "#7d8590"
             font.pixelSize: 11
             font.family: "JetBrains Mono, monospace"
+        }
+    }
+
+    // ── Direct Parameter Upload Modal Dialog ──────────────────────────────────
+    Dialog {
+        id: uploadParamDialog
+        width: 490
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        padding: 0
+        topPadding: 0
+        bottomPadding: 0
+        leftPadding: 0
+        rightPadding: 0
+
+        Material.theme: Material.Dark
+        Material.accent: "#00d4ff"
+
+        background: Rectangle {
+            color: "#161b22"
+            radius: 8
+            border.color: "#30363d"
+            border.width: 1
+        }
+
+        function openDialog(initialName, initialVal) {
+            paramNameInput.text = initialName ? initialName.toUpperCase() : "";
+            paramValInput.text = initialVal !== undefined ? String(initialVal) : "";
+            validationWarning.text = "";
+            open();
+            paramNameInput.forceActiveFocus();
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 0
+
+            // Header
+            Rectangle {
+                Layout.fillWidth: true
+                height: 48
+                color: "#0d1117"
+                radius: 8
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    width: parent.width
+                    height: 8
+                    color: "#0d1117"
+                }
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 16
+                    anchors.rightMargin: 16
+                    spacing: 10
+
+                    Text {
+                        text: "⬆ Upload Parameter Directly to Drone"
+                        font.pixelSize: 14
+                        font.bold: true
+                        color: "#e6edf3"
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Rectangle {
+                        height: 22
+                        width: targetBadgeTxt.implicitWidth + 14
+                        radius: 4
+                        color: drone ? "#1f3b58" : "#3e2424"
+                        border.color: drone ? "#58a6ff" : "#f85149"
+                        border.width: 1
+                        Text {
+                            id: targetBadgeTxt
+                            text: drone ? (drone.name + " • SYS " + drone.sysId) : "NO VEHICLE"
+                            font.pixelSize: 10
+                            font.bold: true
+                            color: drone ? "#58a6ff" : "#f85149"
+                            anchors.centerIn: parent
+                        }
+                    }
+
+                    Text {
+                        text: "✕"
+                        font.pixelSize: 14
+                        color: "#7d8590"
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: uploadParamDialog.close()
+                        }
+                    }
+                }
+            }
+
+            Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+            // Body
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.margins: 16
+                spacing: 12
+
+                Text {
+                    text: "Transmit MAVLink PARAM_SET directly to the autopilot memory for immediate effect."
+                    font.pixelSize: 11
+                    color: "#8b949e"
+                }
+
+                // Parameter Name Input
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 4
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text {
+                            text: "PARAMETER NAME / ID (max 16 chars)"
+                            font.pixelSize: 10
+                            font.bold: true
+                            color: "#7d8590"
+                        }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            text: paramNameInput.text.length + " / 16"
+                            font.pixelSize: 9
+                            color: paramNameInput.text.length > 16 ? "#f85149" : "#7d8590"
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 36
+                        radius: 5
+                        color: "#0d1117"
+                        border.color: paramNameInput.activeFocus ? "#00d4ff" : "#30363d"
+                        border.width: 1
+
+                        TextInput {
+                            id: paramNameInput
+                            anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                            verticalAlignment: TextInput.AlignVCenter
+                            color: "#e6edf3"
+                            font.pixelSize: 13
+                            font.bold: true
+                            font.family: "JetBrains Mono, monospace"
+                            font.capitalization: Font.AllUppercase
+                            maximumLength: 16
+                            selectByMouse: true
+                            Keys.onReturnPressed: paramValInput.forceActiveFocus()
+                        }
+                    }
+
+                    // Autocomplete Quick Presets
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: 6
+                        Repeater {
+                            model: (drone && drone.autopilotType === "PX4") ?
+                                ["MPC_XY_CRUISE", "MPC_LAND_SPEED", "MPC_YAWRAUTO_MAX", "GF_ACTION", "MIS_TAKEOFF_ALT"] :
+                                ["WPNAV_SPEED", "RTL_ALT", "RTL_SPEED", "WPNAV_YAW_RATE", "BATT_ARM_VOLT", "FENCE_ACTION"]
+                            delegate: Rectangle {
+                                height: 22
+                                width: chipText.implicitWidth + 12
+                                radius: 4
+                                color: "#21262d"
+                                border.color: "#30363d"
+                                border.width: 1
+                                Text {
+                                    id: chipText
+                                    text: modelData
+                                    font.pixelSize: 9
+                                    font.bold: true
+                                    font.family: "JetBrains Mono, monospace"
+                                    color: "#58a6ff"
+                                    anchors.centerIn: parent
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    hoverEnabled: true
+                                    onEntered: parent.color = "#30363d"
+                                    onExited: parent.color = "#21262d"
+                                    onClicked: {
+                                        paramNameInput.text = modelData;
+                                        paramValInput.forceActiveFocus();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Value & Type Row
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 12
+
+                    // Value
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+                        Text {
+                            text: "VALUE (NUMERIC)"
+                            font.pixelSize: 10
+                            font.bold: true
+                            color: "#7d8590"
+                        }
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 36
+                            radius: 5
+                            color: "#0d1117"
+                            border.color: paramValInput.activeFocus ? "#00d4ff" : "#30363d"
+                            border.width: 1
+
+                            TextInput {
+                                id: paramValInput
+                                anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                                verticalAlignment: TextInput.AlignVCenter
+                                color: "#00d4ff"
+                                font.pixelSize: 13
+                                font.bold: true
+                                font.family: "JetBrains Mono, monospace"
+                                selectByMouse: true
+                                Keys.onReturnPressed: doUpload()
+                            }
+                        }
+                    }
+
+                    // Type
+                    ColumnLayout {
+                        Layout.preferredWidth: 140
+                        spacing: 4
+                        Text {
+                            text: "PARAM TYPE"
+                            font.pixelSize: 10
+                            font.bold: true
+                            color: "#7d8590"
+                        }
+                        ComboBox {
+                            id: paramTypeCombo
+                            Layout.preferredWidth: 140
+                            Layout.preferredHeight: 36
+                            model: ["REAL32 (Float)", "INT32", "INT16", "INT8"]
+                            Material.background: "#0d1117"
+                            Material.accent: "#00d4ff"
+                        }
+                    }
+                }
+
+                // Description Box
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 32
+                    radius: 4
+                    color: "#0d1117"
+                    border.color: "#21262d"
+                    border.width: 1
+                    visible: getParamDescription(paramNameInput.text.trim().toUpperCase()).length > 0
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        Text {
+                            text: "ℹ " + getParamDescription(paramNameInput.text.trim().toUpperCase())
+                            color: "#58a6ff"
+                            font.pixelSize: 10
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                        }
+                    }
+                }
+
+                // Validation Warning
+                Text {
+                    id: validationWarning
+                    text: ""
+                    color: "#f85149"
+                    font.pixelSize: 11
+                    font.bold: true
+                    visible: text.length > 0
+                }
+            }
+
+            Rectangle { Layout.fillWidth: true; height: 1; color: "#21262d" }
+
+            // Footer
+            Rectangle {
+                Layout.fillWidth: true
+                height: 48
+                color: "#0d1117"
+                radius: 8
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 16
+                    anchors.rightMargin: 16
+
+                    Item { Layout.fillWidth: true }
+
+                    Button {
+                        text: "Cancel"
+                        Layout.preferredHeight: 32
+                        font.pixelSize: 11
+                        Material.background: "#21262d"
+                        contentItem: Text {
+                            text: parent.text
+                            color: "#8b949e"
+                            font: parent.font
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        onClicked: uploadParamDialog.close()
+                    }
+
+                    Button {
+                        text: "⬆ Upload to Drone"
+                        Layout.preferredHeight: 32
+                        font.pixelSize: 11
+                        font.bold: true
+                        Material.background: "#238636"
+                        contentItem: Text {
+                            text: parent.text
+                            color: "#ffffff"
+                            font: parent.font
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        onClicked: doUpload()
+                    }
+                }
+            }
+        }
+
+        function doUpload() {
+            var name = paramNameInput.text.trim().toUpperCase();
+            var valStr = paramValInput.text.trim();
+            if (!drone) {
+                validationWarning.text = "Error: No vehicle connected to receive parameters.";
+                return;
+            }
+            if (name.length === 0) {
+                validationWarning.text = "Error: Please enter a parameter name.";
+                return;
+            }
+            var floatVal = parseFloat(valStr);
+            if (isNaN(floatVal)) {
+                validationWarning.text = "Error: Value must be a valid numeric value.";
+                return;
+            }
+
+            // Map type: REAL32 = 9, INT32 = 6, INT16 = 4, INT8 = 2
+            var typeCode = 9;
+            if (paramTypeCombo.currentIndex === 1) typeCode = 6;
+            else if (paramTypeCombo.currentIndex === 2) typeCode = 4;
+            else if (paramTypeCombo.currentIndex === 3) typeCode = 2;
+
+            drone.setParamWithType(name, floatVal, typeCode);
+
+            // Update or insert into paramModel
+            var found = false;
+            for (var i = 0; i < paramModel.count; i++) {
+                var item = paramModel.get(i);
+                if (item.name === name) {
+                    paramModel.setProperty(i, "value", String(floatVal));
+                    paramModel.setProperty(i, "dirty", false);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                paramModel.insert(0, {
+                    name: name,
+                    value: String(floatVal),
+                    type: paramTypeCombo.currentText.split(" ")[0],
+                    description: getParamDescription(name),
+                    dirty: false
+                });
+            }
+
+            var vehicleName = drone.name ? drone.name : ("Drone " + drone.sysId);
+            showNotification("✓ Parameter " + name + " = " + floatVal + " successfully uploaded to " + vehicleName + " onboard memory", true);
+
+            if (typeof audioAnnunciator !== "undefined" && audioAnnunciator) {
+                audioAnnunciator.say("Parameter " + name + " uploaded");
+            }
+
+            uploadParamDialog.close();
+        }
+    }
+
+    // ── Helper Functions ──────────────────────────────────────────────────────
+    function showNotification(msg, success) {
+        bannerText.text = msg;
+        bannerSuccess = (success !== undefined) ? success : true;
+        bannerVisible = true;
+        bannerTimer.restart();
+    }
+
+    function updateDirtyCount() {
+        var cnt = 0;
+        for (var i = 0; i < paramModel.count; i++) {
+            if (paramModel.get(i).dirty) cnt++;
+        }
+        dirtyCount = cnt;
+    }
+
+    function uploadAllModified() {
+        if (!drone) {
+            showNotification("Error: No vehicle connected.", false);
+            return;
+        }
+        var count = 0;
+        for (var i = 0; i < paramModel.count; i++) {
+            var item = paramModel.get(i);
+            if (item.dirty) {
+                var floatVal = parseFloat(item.value);
+                if (!isNaN(floatVal)) {
+                    drone.setParam(item.name, floatVal);
+                    paramModel.setProperty(i, "dirty", false);
+                    count++;
+                }
+            }
+        }
+        dirtyCount = 0;
+        if (count > 0) {
+            var vehicleName = drone.name ? drone.name : ("Drone " + drone.sysId);
+            showNotification("✓ Uploaded " + count + " modified parameters directly to " + vehicleName, true);
+            if (typeof audioAnnunciator !== "undefined" && audioAnnunciator) {
+                audioAnnunciator.say(count + " parameters uploaded to vehicle");
+            }
+        }
+    }
+
+    function uploadSingleParam(idx) {
+        if (!drone) {
+            showNotification("Error: No vehicle connected.", false);
+            return;
+        }
+        if (idx < 0 || idx >= paramModel.count) return;
+        var item = paramModel.get(idx);
+        var floatVal = parseFloat(item.value);
+        if (isNaN(floatVal)) {
+            showNotification("Error: Invalid numeric value for " + item.name, false);
+            return;
+        }
+        drone.setParam(item.name, floatVal);
+        paramModel.setProperty(idx, "dirty", false);
+        updateDirtyCount();
+
+        var vehicleName = drone.name ? drone.name : ("Drone " + drone.sysId);
+        showNotification("✓ Parameter " + item.name + " = " + floatVal + " uploaded to " + vehicleName, true);
+
+        if (typeof audioAnnunciator !== "undefined" && audioAnnunciator) {
+            audioAnnunciator.say("Parameter " + item.name + " uploaded");
         }
     }
 
@@ -448,6 +1117,7 @@ Rectangle {
                 dirty: false
             });
         }
+        dirtyCount = 0;
         statusLabel.text = keys.length + " vehicle parameters synchronized from " + drone.name;
     }
 
@@ -471,31 +1141,31 @@ Rectangle {
                 });
             }
         }
-    }
-
-    function applyParam(name, value) {
-        if (!drone) return;
-        var floatVal = parseFloat(value);
-        if (isNaN(floatVal)) return;
-
-        drone.setParam(name, floatVal);
-        statusLabel.text = "Set " + name + " = " + floatVal;
+        dirtyCount = 0;
     }
 
     function getParamDescription(name) {
         // High-value quick dictionary for ArduPilot & PX4
         var dict = {
             "MPC_XY_CRUISE": "PX4 Return & autonomous mission cruise speed (m/s)",
+            "MPC_LAND_SPEED": "PX4 Descend and touchdown landing velocity (m/s)",
             "MPC_YAWRAUTO_MAX": "PX4 Max auto-flight yaw turning speed (deg/s)",
             "MC_YAWRATE_MAX": "PX4 Max manual/attitude yaw speed (deg/s)",
             "MPC_YAW_MODE": "PX4 Waypoint yaw heading mode (0=Towards WP, 4=Fixed)",
+            "MIS_TAKEOFF_ALT": "PX4 Automatic mission takeoff altitude target (m)",
             "GF_ACTION": "PX4 Geofence breach action (1=Warn, 2=Hold, 3=RTL, 4=Land)",
             "GF_MAX_HOR_DIST": "PX4 Geofence maximum horizontal radius from Home (m)",
             "GF_MAX_VER_DIST": "PX4 Geofence maximum altitude ceiling (m)",
+            "RTL_ALT": "ArduPilot Return-to-Launch return altitude (cm or m)",
             "RTL_SPEED": "ArduPilot Return-to-Launch cruise speed (cm/s, 0=WPNAV)",
             "WPNAV_SPEED": "ArduPilot Waypoint navigation speed (cm/s)",
+            "WPNAV_RADIUS": "ArduPilot Waypoint arrival acceptance radius (cm)",
             "WPNAV_YAW_RATE": "ArduPilot Navigation yaw turning rate (deg/s)",
             "WP_YAW_BEHAVIOR": "ArduPilot Auto-yaw waypoint facing behavior (1=Face WP, 0=None)",
+            "BATT_ARM_VOLT": "ArduPilot Minimum battery voltage to allow arming (V)",
+            "BATT_CAPACITY": "ArduPilot Battery capacity (mAh)",
+            "BATT_LOW_VOLT": "ArduPilot Low battery warning failsafe voltage (V)",
+            "BATT_CRT_VOLT": "ArduPilot Critical battery failsafe return voltage (V)",
             "FENCE_ENABLE": "ArduPilot Master geofence safety switch (1=Enabled)",
             "FENCE_ACTION": "ArduPilot Breach action (0=Warn, 1=RTL, 2=Land, 3=Loiter)",
             "FENCE_RADIUS": "ArduPilot Circular boundary radius around Home (m)",
@@ -527,6 +1197,7 @@ Rectangle {
             { name: "FENCE_RADIUS",    value: "300",   type: "REAL32", description: "ArduPilot Circular fence radius (m)", dirty: false }
         ];
         for (var i = 0; i < defaults.length; i++) paramModel.append(defaults[i]);
+        dirtyCount = 0;
         statusLabel.text = defaults.length + " default tuning parameters loaded.";
     }
 
