@@ -121,6 +121,8 @@ qt_add_resources(DRONE_GCS "assets"
 # ─── Map & Python scripts (copy to build) ─────────────────────────────────────
 configure_file(${CMAKE_SOURCE_DIR}/map/map.html       ${CMAKE_BINARY_DIR}/map/map.html COPYONLY)
 configure_file(${CMAKE_SOURCE_DIR}/map/map.js         ${CMAKE_BINARY_DIR}/map/map.js   COPYONLY)
+configure_file(${CMAKE_SOURCE_DIR}/map/map3d.html     ${CMAKE_BINARY_DIR}/map/map3d.html COPYONLY)
+configure_file(${CMAKE_SOURCE_DIR}/map/map3d.js       ${CMAKE_BINARY_DIR}/map/map3d.js COPYONLY)
 configure_file(${CMAKE_SOURCE_DIR}/map/qwebchannel.js ${CMAKE_BINARY_DIR}/map/qwebchannel.js COPYONLY)
 
 # Copy all python_scripts
@@ -130,12 +132,18 @@ foreach(PY ${PY_SCRIPTS})
     configure_file(${PY} ${CMAKE_BINARY_DIR}/python_scripts/${PY_NAME} COPYONLY)
 endforeach()
 
-# ─── Leaflet assets copy ──────────────────────────────────────────────────────
+# ─── Leaflet, Cesium and 3D Model assets copy ─────────────────────────────────
 add_custom_command(TARGET DRONE_GCS POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/map/leaflet
         ${CMAKE_BINARY_DIR}/map/leaflet
-    COMMENT "Copying Leaflet assets"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/map/cesium
+        ${CMAKE_BINARY_DIR}/map/cesium
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/map/models
+        ${CMAKE_BINARY_DIR}/map/models
+    COMMENT "Copying Leaflet, Cesium and 3D Model assets"
 )
 
 # ─── Link libraries ───────────────────────────────────────────────────────────

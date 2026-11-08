@@ -15,6 +15,70 @@ Rectangle {
     property string activeInteractionMode: "none"
     property bool hudCollapsed: false
     property bool showPfdGauge: true
+    property bool is3DMode: false
+    property string cameraMode3D: "FOLLOW"
+
+    function set3DMode(enabled) {
+        if (is3DMode === enabled) return;
+        is3DMode = enabled;
+        if (is3DMode) {
+            mapView3D.runJavaScript("setRenderLoopActive(true); recenter();");
+            mapView3D.runJavaScript("setMapProvider('" + mapProviderCombo.currentText + "');");
+            if (drone) {
+                syncDroneTo3D(drone);
+                if (drone.homeLat !== 0) {
+                    mapView3D.runJavaScript("setHomePosition(" + drone.homeLat + "," + drone.homeLon + "," + drone.homeAlt + ");");
+                    mapView3D.runJavaScript("setBatteryRthRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.safeReturnRadius + ");");
+                    if (drone.geofenceEnabled && drone.circularFenceEnabled) {
+                        mapView3D.runJavaScript("setGeofenceRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.geofenceRadius + ");");
+                    }
+                }
+                if (drone.geofencePolygon && drone.geofencePolygon.length >= 3) {
+                    mapView3D.runJavaScript("setGeofence(" + JSON.stringify(drone.geofencePolygon) + ");");
+                }
+            }
+            mapView.runJavaScript("getWaypoints()", function(result) {
+                if (result && result !== "[]") {
+                    mapView3D.runJavaScript("setWaypoints(" + result + ");");
+                }
+            });
+        } else {
+            mapView3D.runJavaScript("setRenderLoopActive(false);");
+            if (drone) {
+                mapView.runJavaScript("centerOn(" + drone.latitude + "," + drone.longitude + ");");
+            }
+        }
+    }
+
+    function syncDroneTo3D(d) {
+        if (!d) return;
+        var js = "if (typeof updateDrone3D === 'function') updateDrone3D(" +
+                 d.sysId + "," +
+                 d.latitude + "," +
+                 d.longitude + "," +
+                 d.altitude + "," +
+                 d.relAltitude + "," +
+                 d.headingDeg + "," +
+                 d.pitch + "," +
+                 d.roll + "," +
+                 d.groundSpeed + "," +
+                 d.airSpeed + "," +
+                 d.climbRate + "," +
+                 (d.isArmed ? "true" : "false") + ",'" +
+                 (d.flightMode || "UNKNOWN") + "'," +
+                 d.gpsFixType + "," +
+                 (!d.isConnected ? "true" : "false") + ");";
+        mapView3D.runJavaScript(js);
+    }
+
+    function setCameraMode(mode) {
+        cameraMode3D = mode;
+        mapView3D.runJavaScript("setCameraMode('" + mode + "');");
+    }
+
+    function setCameraTilt(tiltDeg) {
+        mapView3D.runJavaScript("setCameraTilt(" + tiltDeg + ");");
+    }
 
     // QWebChannel bridge object exposed to JavaScript
     WebChannel {
@@ -65,38 +129,47 @@ Rectangle {
         function onPositionChanged() {
             if (drone && drone.homeLat !== 0) {
                 mapView.runJavaScript("setBatteryRthRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.safeReturnRadius + ");");
+                mapView3D.runJavaScript("setBatteryRthRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.safeReturnRadius + ");");
                 if (drone.geofenceEnabled && drone.circularFenceEnabled) {
                     mapView.runJavaScript("setGeofenceRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.geofenceRadius + ");");
+                    mapView3D.runJavaScript("setGeofenceRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.geofenceRadius + ");");
                 }
             }
         }
         function onBatteryChanged() {
             if (drone && drone.homeLat !== 0) {
                 mapView.runJavaScript("setBatteryRthRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.safeReturnRadius + ");");
+                mapView3D.runJavaScript("setBatteryRthRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.safeReturnRadius + ");");
             }
         }
         function onGeofenceChanged() {
             if (drone) {
                 if (drone.geofencePolygon && drone.geofencePolygon.length >= 3) {
                     mapView.runJavaScript("setGeofence(" + JSON.stringify(drone.geofencePolygon) + ");");
+                    mapView3D.runJavaScript("setGeofence(" + JSON.stringify(drone.geofencePolygon) + ");");
                 }
                 if (drone.circularFenceEnabled && drone.homeLat !== 0) {
                     mapView.runJavaScript("setGeofenceRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.geofenceRadius + ");");
+                    mapView3D.runJavaScript("setGeofenceRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.geofenceRadius + ");");
                 } else if (!drone.circularFenceEnabled) {
                     mapView.runJavaScript("clearGeofenceCircle();");
+                    mapView3D.runJavaScript("clearGeofenceCircle();");
                 }
             }
         }
         function onGeofencePolygonChanged() {
             if (drone && drone.geofencePolygon && drone.geofencePolygon.length >= 3) {
                 mapView.runJavaScript("setGeofence(" + JSON.stringify(drone.geofencePolygon) + ");");
+                mapView3D.runJavaScript("setGeofence(" + JSON.stringify(drone.geofencePolygon) + ");");
             }
         }
         function onCircularFenceEnabledChanged() {
             if (drone && drone.homeLat !== 0 && drone.geofenceEnabled && drone.circularFenceEnabled) {
                 mapView.runJavaScript("setGeofenceRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.geofenceRadius + ");");
+                mapView3D.runJavaScript("setGeofenceRadius(" + drone.homeLat + "," + drone.homeLon + "," + drone.geofenceRadius + ");");
             } else {
                 mapView.runJavaScript("clearGeofenceCircle();");
+                mapView3D.runJavaScript("clearGeofenceCircle();");
             }
         }
         function onMissionDownloaded(waypoints) {
@@ -104,6 +177,11 @@ Rectangle {
                 waypointDrawer.setWaypoints(waypoints);
             }
             setWaypoints(waypoints);
+        }
+        function onHomePositionChanged() {
+            if (drone && drone.homeLat !== 0) {
+                mapView3D.runJavaScript("setHomePosition(" + drone.homeLat + "," + drone.homeLon + "," + drone.homeAlt + ");");
+            }
         }
     }
 
@@ -113,15 +191,36 @@ Rectangle {
                      drone.sysId + "," + drone.latitude + "," + drone.longitude + "," +
                      drone.headingDeg + ",'" + drone.color + "','" + drone.name + "');";
             mapView.runJavaScript(js);
+            if (root.is3DMode) syncDroneTo3D(drone);
+        });
+        drone.attitudeChanged.connect(function() {
+            if (root.is3DMode) syncDroneTo3D(drone);
+        });
+        drone.headingChanged.connect(function() {
+            if (root.is3DMode) syncDroneTo3D(drone);
+        });
+        drone.speedChanged.connect(function() {
+            if (root.is3DMode) syncDroneTo3D(drone);
+        });
+        drone.armedChanged.connect(function() {
+            if (root.is3DMode) syncDroneTo3D(drone);
+        });
+        drone.flightModeChanged.connect(function() {
+            if (root.is3DMode) syncDroneTo3D(drone);
+        });
+        drone.connectionChanged.connect(function() {
+            if (root.is3DMode) syncDroneTo3D(drone);
         });
     }
 
     function setWaypoints(wps) {
         mapView.runJavaScript("setWaypoints(" + JSON.stringify(wps) + ")");
+        mapView3D.runJavaScript("setWaypoints(" + JSON.stringify(wps) + ")");
     }
 
     function setGeofence(poly) {
         mapView.runJavaScript("setGeofence(" + JSON.stringify(poly) + ")");
+        mapView3D.runJavaScript("setGeofence(" + JSON.stringify(poly) + ")");
     }
 
     signal requestCloseAiDrawer()
@@ -528,6 +627,7 @@ Rectangle {
 
                     onActivated: function(index) {
                         mapView.runJavaScript("setMapProvider('" + currentText + "');");
+                        mapView3D.runJavaScript("setMapProvider('" + currentText + "');");
                     }
                 }
 
@@ -709,6 +809,7 @@ Rectangle {
                                 drone.clearMission();
                             }
                             mapView.runJavaScript("clearWaypoints()");
+                            mapView3D.runJavaScript("clearWaypoints()");
                             wpUploadStatus.text = "Mission Cleared";
                             wpUploadStatus.color = "#f85149";
                             wpUploadStatus.visible = true;
@@ -861,6 +962,144 @@ Rectangle {
                     }
                 }
 
+                // ── 2D / 3D Geospatial View Switcher ──
+                Rectangle {
+                    width: 96
+                    height: 26
+                    radius: 4
+                    color: "#0d1117"
+                    border.color: "#00d4ff"
+                    border.width: 1
+
+                    Row {
+                        anchors.fill: parent
+                        Rectangle {
+                            width: parent.width / 2; height: parent.height; radius: 3
+                            color: !root.is3DMode ? "#00d4ff" : "transparent"
+                            Text {
+                                anchors.centerIn: parent
+                                text: "2D"
+                                font.pixelSize: 11; font.bold: true
+                                color: !root.is3DMode ? "#0d1117" : "#8b949e"
+                            }
+                            MouseArea {
+                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                onClicked: root.set3DMode(false)
+                            }
+                        }
+                        Rectangle {
+                            width: parent.width / 2; height: parent.height; radius: 3
+                            color: root.is3DMode ? "#00d4ff" : "transparent"
+                            Text {
+                                anchors.centerIn: parent
+                                text: "3D"
+                                font.pixelSize: 11; font.bold: true
+                                color: root.is3DMode ? "#0d1117" : "#8b949e"
+                            }
+                            MouseArea {
+                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                onClicked: root.set3DMode(true)
+                            }
+                        }
+                    }
+                }
+
+                // ── 3D Camera Controls (Visible when in 3D Mode) ──
+                RowLayout {
+                    visible: root.is3DMode
+                    spacing: 4
+
+                    // Follow Cam
+                    Rectangle {
+                        width: 60; height: 26; radius: 4
+                        color: root.cameraMode3D === "FOLLOW" ? "#00d4ff25" : "#21262d"
+                        border.color: root.cameraMode3D === "FOLLOW" ? "#00d4ff" : "#30363d"; border.width: 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: "CHASE"
+                            color: root.cameraMode3D === "FOLLOW" ? "#00d4ff" : "#8b949e"
+                            font.pixelSize: 10; font.bold: root.cameraMode3D === "FOLLOW"
+                        }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.setCameraMode("FOLLOW")
+                        }
+                    }
+
+                    // Free Orbit Cam
+                    Rectangle {
+                        width: 50; height: 26; radius: 4
+                        color: root.cameraMode3D === "FREE" ? "#00d4ff25" : "#21262d"
+                        border.color: root.cameraMode3D === "FREE" ? "#00d4ff" : "#30363d"; border.width: 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: "FREE"
+                            color: root.cameraMode3D === "FREE" ? "#00d4ff" : "#8b949e"
+                            font.pixelSize: 10; font.bold: root.cameraMode3D === "FREE"
+                        }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.setCameraMode("FREE")
+                        }
+                    }
+
+                    // Top-Down Nadir Cam
+                    Rectangle {
+                        width: 62; height: 26; radius: 4
+                        color: root.cameraMode3D === "TOP_DOWN" ? "#00d4ff25" : "#21262d"
+                        border.color: root.cameraMode3D === "TOP_DOWN" ? "#00d4ff" : "#30363d"; border.width: 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: "TOP-DN"
+                            color: root.cameraMode3D === "TOP_DOWN" ? "#00d4ff" : "#8b949e"
+                            font.pixelSize: 10; font.bold: root.cameraMode3D === "TOP_DOWN"
+                        }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.setCameraMode("TOP_DOWN")
+                        }
+                    }
+
+                    // Theater Overview Cam
+                    Rectangle {
+                        width: 65; height: 26; radius: 4
+                        color: root.cameraMode3D === "OVERVIEW" ? "#00d4ff25" : "#21262d"
+                        border.color: root.cameraMode3D === "OVERVIEW" ? "#00d4ff" : "#30363d"; border.width: 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: "THEATER"
+                            color: root.cameraMode3D === "OVERVIEW" ? "#00d4ff" : "#8b949e"
+                            font.pixelSize: 10; font.bold: root.cameraMode3D === "OVERVIEW"
+                        }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.setCameraMode("OVERVIEW")
+                        }
+                    }
+
+                    // Camera Tilt Quick Cycle
+                    Rectangle {
+                        id: tiltBtn
+                        width: 58; height: 26; radius: 4
+                        property int tiltAngle: 25
+                        color: "#21262d"; border.color: "#30363d"; border.width: 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: "∠ " + tiltBtn.tiltAngle + "°"
+                            color: "#e6edf3"; font.pixelSize: 10; font.bold: true
+                        }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (tiltBtn.tiltAngle === 25) tiltBtn.tiltAngle = 45;
+                                else if (tiltBtn.tiltAngle === 45) tiltBtn.tiltAngle = 75;
+                                else tiltBtn.tiltAngle = 25;
+                                root.setCameraTilt(tiltBtn.tiltAngle);
+                            }
+                        }
+                    }
+                }
+
                 // Center / Follow Drone
                 Rectangle {
                     width: 96; height: 26; radius: 4
@@ -875,8 +1114,12 @@ Rectangle {
                     MouseArea {
                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            var d = droneManager.activeDrone;
-                            if (d) mapView.runJavaScript("centerOn(" + d.latitude + "," + d.longitude + ")");
+                            if (root.is3DMode) {
+                                mapView3D.runJavaScript("recenter();");
+                            } else {
+                                var d = droneManager.activeDrone;
+                                if (d) mapView.runJavaScript("centerOn(" + d.latitude + "," + d.longitude + ")");
+                            }
                         }
                     }
                 }
@@ -884,7 +1127,7 @@ Rectangle {
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // 3. MAP VIEW (Leaflet WebEngineView)
+        // 3. MAP VIEW (Dual 2D Leaflet & 3D Cesium WebEngineView)
         // ═════════════════════════════════════════════════════════════════════
         Item {
             Layout.fillWidth: true
@@ -893,6 +1136,7 @@ Rectangle {
             WebEngineView {
                 id: mapView
                 anchors.fill: parent
+                visible: !root.is3DMode
                 url: "file://" + appDirPath + "/map/map.html"
                 webChannel: webChannel
                 settings.javascriptEnabled: true
@@ -901,6 +1145,21 @@ Rectangle {
 
                 onJavaScriptConsoleMessage: function(level, message, lineNumber, sourceID) {
                     console.log("[Leaflet Map JS]", message, "line:", lineNumber);
+                }
+            }
+
+            WebEngineView {
+                id: mapView3D
+                anchors.fill: parent
+                visible: root.is3DMode
+                url: "file://" + appDirPath + "/map/map3d.html"
+                webChannel: webChannel
+                settings.javascriptEnabled: true
+                settings.localContentCanAccessRemoteUrls: true
+                settings.localContentCanAccessFileUrls: true
+
+                onJavaScriptConsoleMessage: function(level, message, lineNumber, sourceID) {
+                    console.log("[Cesium 3D JS]", message, "line:", lineNumber);
                 }
             }
 
