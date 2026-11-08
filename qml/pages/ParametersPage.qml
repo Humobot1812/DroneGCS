@@ -239,41 +239,48 @@ Rectangle {
         Rectangle {
             id: notificationBanner
             Layout.fillWidth: true
-            height: bannerVisible ? 36 : 0
-            visible: height > 0
+            Layout.preferredHeight: bannerVisible ? 40 : 0
+            visible: bannerVisible
             clip: true
-            color: bannerSuccess ? "#122a1b" : "#381a1a"
+            color: bannerSuccess ? "#132d1d" : "#3d1a1a"
             border.color: bannerSuccess ? "#3fb950" : "#f85149"
             border.width: 1
             radius: 6
 
-            Behavior on height { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 12
+                anchors.leftMargin: 14
+                anchors.rightMargin: 14
                 spacing: 10
 
                 Text {
                     text: bannerSuccess ? "✓" : "⚠"
-                    font.pixelSize: 13
+                    font.pixelSize: 14
                     font.bold: true
                     color: bannerSuccess ? "#3fb950" : "#f85149"
                 }
                 Text {
                     id: bannerText
                     text: ""
-                    font.pixelSize: 11
+                    font.pixelSize: 12
                     font.bold: true
                     color: "#e6edf3"
                     Layout.fillWidth: true
                     elide: Text.ElideRight
+                    verticalAlignment: Text.AlignVCenter
                 }
-                Text {
-                    text: "✕"
-                    font.pixelSize: 12
-                    color: "#8b949e"
+                Rectangle {
+                    width: 22
+                    height: 22
+                    radius: 11
+                    color: bannerSuccess ? "#1f3b28" : "#4c2020"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "✕"
+                        font.pixelSize: 11
+                        font.bold: true
+                        color: bannerSuccess ? "#56d364" : "#ff7b72"
+                    }
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
@@ -285,7 +292,7 @@ Rectangle {
 
         Timer {
             id: bannerTimer
-            interval: 4500
+            interval: 5000
             repeat: false
             onTriggered: bannerVisible = false
         }
@@ -293,6 +300,7 @@ Rectangle {
         // ── Quick Flight Tuning Panel (PX4 + ArduPilot Unified) ────────────────
         Rectangle {
             Layout.fillWidth: true
+            Layout.preferredHeight: 94
             height: 94
             radius: 8
             color: "#161b22"
@@ -443,6 +451,7 @@ Rectangle {
         // Column headers
         Rectangle {
             Layout.fillWidth: true
+            Layout.preferredHeight: 30
             height: 30
             color: "#161b22"
             radius: 4
