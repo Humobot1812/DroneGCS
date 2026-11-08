@@ -104,6 +104,10 @@ class DroneVehicle : public QObject
     Q_PROPERTY(bool autoYawEnabled READ autoYawEnabled WRITE setAutoYawEnabled NOTIFY vehicleParamsChanged)
     Q_PROPERTY(QVariantMap parameters READ parameters NOTIFY parametersChanged)
     Q_PROPERTY(int parameterCount READ parameterCount NOTIFY parametersChanged)
+    Q_PROPERTY(bool paramUploadActive READ isParamUploadActive NOTIFY paramUploadActiveChanged)
+    Q_PROPERTY(double paramUploadProgress READ paramUploadProgress NOTIFY paramUploadProgressChanged)
+    Q_PROPERTY(int paramUploadTotal READ paramUploadTotal NOTIFY paramUploadTotalChanged)
+    Q_PROPERTY(int paramUploadCurrent READ paramUploadCurrent NOTIFY paramUploadCurrentChanged)
 
 public:
     explicit DroneVehicle(quint8 sysId, QObject *parent = nullptr);
@@ -219,9 +223,17 @@ public:
     QVariantMap parameters() const { return m_parameters; }
     int parameterCount() const { return m_parameters.size(); }
 
+    bool isParamUploadActive() const { return m_paramUploadActive; }
+    double paramUploadProgress() const {
+        return m_paramUploadTotal > 0 ? static_cast<double>(m_paramUploadCurrent) / m_paramUploadTotal : 0.0;
+    }
+    int paramUploadTotal() const { return m_paramUploadTotal; }
+    int paramUploadCurrent() const { return m_paramUploadCurrent; }
+
     Q_INVOKABLE void requestAllParameters();
     Q_INVOKABLE void setParam(const QString &paramName, float value);
     Q_INVOKABLE void setParamWithType(const QString &paramName, float value, int paramType = 9);
+    Q_INVOKABLE void uploadAllParameters(const QVariantList &paramList);
     Q_INVOKABLE void fetchGeofenceFromDrone();
     Q_INVOKABLE void downloadMission();
 
@@ -236,6 +248,11 @@ public:
 signals:
     void vehicleParamsChanged();
     void parametersChanged();
+    void paramUploadActiveChanged();
+    void paramUploadProgressChanged();
+    void paramUploadTotalChanged();
+    void paramUploadCurrentChanged();
+    void paramUploadComplete(int count, bool success);
     void missionDownloaded(const QVariantList &waypoints);
     void nameChanged();
     void colorChanged();
@@ -295,6 +312,7 @@ private:
     void checkBatteryFailsafe();
     void updateDistancesAndReturnRadius();
     void sendMavlinkParam(const char *paramId, float value, uint8_t paramType = 9);
+    void processNextParamUpload();
     void checkMissionCompletion(const QString &triggerSource);
     bool isMissionAutoMode(const QString &mode) const;
 
@@ -342,6 +360,13 @@ private:
     static constexpr int k_clearMaxRetries = 2;
 
     QString m_lastStatusText;
+
+    // Batch Parameter Upload
+    bool m_paramUploadActive = false;
+    int m_paramUploadTotal = 0;
+    int m_paramUploadCurrent = 0;
+    QVariantList m_pendingParamUploads;
+    QTimer *m_paramUploadTimer = nullptr;
 
     double  m_homeLat = 0, m_homeLon = 0, m_homeAlt = 0;
     double  m_distanceToHome = 0.0;

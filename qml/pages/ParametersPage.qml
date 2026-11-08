@@ -19,10 +19,27 @@ Rectangle {
     Connections {
         target: drone ? drone : null
         function onParametersChanged() {
-            syncParametersFromDrone();
+            if (!drone || !drone.paramUploadActive) {
+                syncParametersFromDrone();
+            }
         }
         function onVehicleParamsChanged() {
             // updates quick-tuning bindings automatically
+        }
+        function onParamUploadComplete(count, success) {
+            if (success) {
+                for (var i = 0; i < paramModel.count; i++) {
+                    paramModel.setProperty(i, "dirty", false);
+                }
+                dirtyCount = 0;
+                var vehicleName = drone ? (drone.name || ("Drone " + drone.sysId)) : "vehicle";
+                showNotification("✓ All " + count + " parameters successfully updated at once in " + vehicleName, true);
+                if (typeof audioAnnunciator !== "undefined" && audioAnnunciator) {
+                    audioAnnunciator.say("All parameters updated in vehicle successfully");
+                }
+            } else {
+                showNotification("Parameter upload completed or encountered empty list.", false);
+            }
         }
     }
 
@@ -82,58 +99,28 @@ Rectangle {
 
             Item { Layout.fillWidth: true }
 
-            // ── Primary Action: Upload New Parameter Directly ──
+            // ── PRIMARY ACTION: UPLOAD ALL PARAMETERS AT ONCE TO DRONE ──
             Button {
-                id: uploadNewBtn
-                Layout.preferredHeight: 32
+                id: uploadAllBtn
+                Layout.preferredHeight: 34
                 font.pixelSize: 11
                 font.bold: true
-                Material.background: "#1f6feb"
+                Material.background: (drone && drone.paramUploadActive) ? "#1f6feb" : (dirtyCount > 0 ? "#2ea043" : "#238636")
+                enabled: !(drone && drone.paramUploadActive)
                 contentItem: Row {
                     spacing: 6
                     anchors.centerIn: parent
                     Text {
-                        text: "＋"
-                        color: "#ffffff"
-                        font.pixelSize: 13
-                        font.bold: true
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    Text {
-                        text: "Upload New Param"
-                        color: "#ffffff"
-                        font.pixelSize: 11
-                        font.bold: true
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                }
-                ToolTip.visible: hovered
-                ToolTip.text: "Directly inject and upload a new or custom parameter to the drone autopilot"
-                onClicked: {
-                    uploadParamDialog.openDialog();
-                }
-            }
-
-            // ── Upload Modified Parameters (Visible when modified) ──
-            Button {
-                id: uploadModifiedBtn
-                visible: dirtyCount > 0
-                Layout.preferredHeight: 32
-                font.pixelSize: 11
-                font.bold: true
-                Material.background: "#238636"
-                contentItem: Row {
-                    spacing: 6
-                    anchors.centerIn: parent
-                    Text {
-                        text: "⬆"
+                        text: (drone && drone.paramUploadActive) ? "⏳" : "⬆"
                         color: "#ffffff"
                         font.pixelSize: 12
                         font.bold: true
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
-                        text: "Upload Modified (" + dirtyCount + ")"
+                        text: (drone && drone.paramUploadActive)
+                              ? ("Uploading (" + drone.paramUploadCurrent + "/" + drone.paramUploadTotal + ")...")
+                              : ("Upload All to Drone (" + paramModel.count + ")")
                         color: "#ffffff"
                         font.pixelSize: 11
                         font.bold: true
@@ -141,16 +128,48 @@ Rectangle {
                     }
                 }
                 ToolTip.visible: hovered
-                ToolTip.text: "Transmit all pending modified parameters directly to vehicle"
+                ToolTip.text: "Update all parameters at once in the drone autopilot memory"
                 onClicked: {
-                    uploadAllModified();
+                    uploadAllParametersToDrone();
                 }
             }
 
-            // Refresh Parameters Button
+            // ── Add / Edit Parameter Button ──
+            Button {
+                id: addParamBtn
+                Layout.preferredHeight: 34
+                font.pixelSize: 11
+                font.bold: true
+                Material.background: "#21262d"
+                contentItem: Row {
+                    spacing: 6
+                    anchors.centerIn: parent
+                    Text {
+                        text: "＋"
+                        color: "#00d4ff"
+                        font.pixelSize: 12
+                        font.bold: true
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {
+                        text: "Add Parameter"
+                        color: "#e6edf3"
+                        font.pixelSize: 11
+                        font.bold: true
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+                ToolTip.visible: hovered
+                ToolTip.text: "Add a new parameter to the list before uploading to vehicle"
+                onClicked: {
+                    uploadParamDialog.openDialog();
+                }
+            }
+
+            // ── Refresh / Sync Parameters Button ──
             Button {
                 text: "🔄 Sync From Drone"
-                Layout.preferredHeight: 32
+                Layout.preferredHeight: 34
                 font.pixelSize: 11
                 font.bold: true
                 Material.background: "#21262d"
@@ -175,8 +194,8 @@ Rectangle {
 
             // Search Box
             Rectangle {
-                width: 200
-                height: 32
+                width: 190
+                height: 34
                 radius: 5
                 color: "#161b22"
                 border.color: searchField.activeFocus ? "#00d4ff" : "#30363d"
@@ -203,6 +222,17 @@ Rectangle {
                     }
                 }
             }
+        }
+
+        // ── Active Batch Upload Progress Bar ───────────────────────────────────
+        ProgressBar {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 4
+            visible: drone && drone.paramUploadActive
+            from: 0
+            to: 1
+            value: drone ? drone.paramUploadProgress : 0
+            Material.accent: "#2ea043"
         }
 
         // ── Direct Notification Banner ────────────────────────────────────────
@@ -454,7 +484,7 @@ Rectangle {
                     anchors.horizontalCenter: parent.horizontalCenter
                 }
                 Text {
-                    text: "Click '+ Upload New Param' to send a parameter or 'Sync From Drone' to fetch all"
+                    text: "Click '+ Add Parameter' or 'Sync From Drone' to populate and upload"
                     font.pixelSize: 11
                     color: "#484f58"
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -541,8 +571,9 @@ Rectangle {
                                 var floatVal = parseFloat(val);
                                 if (!isNaN(floatVal)) {
                                     paramModel.setProperty(index, "value", val);
+                                    paramModel.setProperty(index, "dirty", true);
+                                    updateDirtyCount();
                                     editing = false;
-                                    uploadSingleParam(index);
                                 }
                             }
                             Keys.onEscapePressed: {
@@ -642,7 +673,7 @@ Rectangle {
         }
     }
 
-    // ── Direct Parameter Upload Modal Dialog ──────────────────────────────────
+    // ── Add / Edit Parameter Modal Dialog ─────────────────────────────────────
     Dialog {
         id: uploadParamDialog
         width: 490
@@ -695,7 +726,7 @@ Rectangle {
                     spacing: 10
 
                     Text {
-                        text: "⬆ Upload Parameter Directly to Drone"
+                        text: "Add Vehicle Parameter"
                         font.pixelSize: 14
                         font.bold: true
                         color: "#e6edf3"
@@ -742,7 +773,7 @@ Rectangle {
                 spacing: 12
 
                 Text {
-                    text: "Transmit MAVLink PARAM_SET directly to the autopilot memory for immediate effect."
+                    text: "Add or modify a vehicle parameter. You can save to the list and update all at once."
                     font.pixelSize: 11
                     color: "#8b949e"
                 }
@@ -863,7 +894,7 @@ Rectangle {
                                 font.bold: true
                                 font.family: "JetBrains Mono, monospace"
                                 selectByMouse: true
-                                Keys.onReturnPressed: doUpload()
+                                Keys.onReturnPressed: doSave(true)
                             }
                         }
                     }
@@ -937,6 +968,7 @@ Rectangle {
                     anchors.fill: parent
                     anchors.leftMargin: 16
                     anchors.rightMargin: 16
+                    spacing: 8
 
                     Item { Layout.fillWidth: true }
 
@@ -956,7 +988,22 @@ Rectangle {
                     }
 
                     Button {
-                        text: "⬆ Upload to Drone"
+                        text: "Add to List"
+                        Layout.preferredHeight: 32
+                        font.pixelSize: 11
+                        Material.background: "#21262d"
+                        contentItem: Text {
+                            text: parent.text
+                            color: "#00d4ff"
+                            font: parent.font
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        onClicked: doSave(false)
+                    }
+
+                    Button {
+                        text: "⬆ Add & Upload All"
                         Layout.preferredHeight: 32
                         font.pixelSize: 11
                         font.bold: true
@@ -968,19 +1015,15 @@ Rectangle {
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
-                        onClicked: doUpload()
+                        onClicked: doSave(true)
                     }
                 }
             }
         }
 
-        function doUpload() {
+        function doSave(andUploadAll) {
             var name = paramNameInput.text.trim().toUpperCase();
             var valStr = paramValInput.text.trim();
-            if (!drone) {
-                validationWarning.text = "Error: No vehicle connected to receive parameters.";
-                return;
-            }
             if (name.length === 0) {
                 validationWarning.text = "Error: Please enter a parameter name.";
                 return;
@@ -991,21 +1034,13 @@ Rectangle {
                 return;
             }
 
-            // Map type: REAL32 = 9, INT32 = 6, INT16 = 4, INT8 = 2
-            var typeCode = 9;
-            if (paramTypeCombo.currentIndex === 1) typeCode = 6;
-            else if (paramTypeCombo.currentIndex === 2) typeCode = 4;
-            else if (paramTypeCombo.currentIndex === 3) typeCode = 2;
-
-            drone.setParamWithType(name, floatVal, typeCode);
-
             // Update or insert into paramModel
             var found = false;
             for (var i = 0; i < paramModel.count; i++) {
                 var item = paramModel.get(i);
                 if (item.name === name) {
                     paramModel.setProperty(i, "value", String(floatVal));
-                    paramModel.setProperty(i, "dirty", false);
+                    paramModel.setProperty(i, "dirty", true);
                     found = true;
                     break;
                 }
@@ -1016,18 +1051,18 @@ Rectangle {
                     value: String(floatVal),
                     type: paramTypeCombo.currentText.split(" ")[0],
                     description: getParamDescription(name),
-                    dirty: false
+                    dirty: true
                 });
             }
 
-            var vehicleName = drone.name ? drone.name : ("Drone " + drone.sysId);
-            showNotification("✓ Parameter " + name + " = " + floatVal + " successfully uploaded to " + vehicleName + " onboard memory", true);
-
-            if (typeof audioAnnunciator !== "undefined" && audioAnnunciator) {
-                audioAnnunciator.say("Parameter " + name + " uploaded");
-            }
-
+            updateDirtyCount();
             uploadParamDialog.close();
+
+            if (andUploadAll) {
+                uploadAllParametersToDrone();
+            } else {
+                showNotification("Parameter " + name + " added to list. Click 'Upload All to Drone' to update vehicle.", true);
+            }
         }
     }
 
@@ -1047,31 +1082,43 @@ Rectangle {
         dirtyCount = cnt;
     }
 
-    function uploadAllModified() {
+    // Main function: Uploads all parameters at once to the drone
+    function uploadAllParametersToDrone() {
         if (!drone) {
-            showNotification("Error: No vehicle connected.", false);
+            showNotification("Error: No vehicle connected to receive parameters.", false);
             return;
         }
-        var count = 0;
+        if (paramModel.count === 0) {
+            showNotification("Error: No parameters available to upload.", false);
+            return;
+        }
+
+        var list = [];
         for (var i = 0; i < paramModel.count; i++) {
             var item = paramModel.get(i);
-            if (item.dirty) {
-                var floatVal = parseFloat(item.value);
-                if (!isNaN(floatVal)) {
-                    drone.setParam(item.name, floatVal);
-                    paramModel.setProperty(i, "dirty", false);
-                    count++;
-                }
-            }
+            var typeCode = 9; // REAL32 default
+            if (item.type === "INT32") typeCode = 6;
+            else if (item.type === "INT16") typeCode = 4;
+            else if (item.type === "INT8") typeCode = 2;
+
+            var fVal = parseFloat(item.value);
+            if (isNaN(fVal)) fVal = 0.0;
+
+            list.push({
+                name: item.name,
+                value: fVal,
+                typeCode: typeCode
+            });
         }
-        dirtyCount = 0;
-        if (count > 0) {
-            var vehicleName = drone.name ? drone.name : ("Drone " + drone.sysId);
-            showNotification("✓ Uploaded " + count + " modified parameters directly to " + vehicleName, true);
-            if (typeof audioAnnunciator !== "undefined" && audioAnnunciator) {
-                audioAnnunciator.say(count + " parameters uploaded to vehicle");
-            }
+
+        var vehicleName = drone.name ? drone.name : ("Drone " + drone.sysId);
+        showNotification("Uploading all " + list.length + " parameters to " + vehicleName + "...", true);
+
+        if (typeof audioAnnunciator !== "undefined" && audioAnnunciator) {
+            audioAnnunciator.say("Uploading all parameters to vehicle");
         }
+
+        drone.uploadAllParameters(list);
     }
 
     function uploadSingleParam(idx) {

@@ -2094,6 +2094,64 @@ void DroneVehicle::setParamWithType(const QString &paramName, float value, int p
     emit statusTextReceived();
 }
 
+void DroneVehicle::uploadAllParameters(const QVariantList &paramList)
+{
+    if (paramList.isEmpty()) {
+        emit paramUploadComplete(0, false);
+        return;
+    }
+
+    m_pendingParamUploads = paramList;
+    m_paramUploadTotal = paramList.size();
+    m_paramUploadCurrent = 0;
+    m_paramUploadActive = true;
+    emit paramUploadActiveChanged();
+    emit paramUploadTotalChanged();
+    emit paramUploadCurrentChanged();
+    emit paramUploadProgressChanged();
+
+    m_lastStatusText = QString("[%1] Uploading all %2 parameters to vehicle...").arg(m_name).arg(m_paramUploadTotal);
+    emit statusTextReceived();
+    qDebug() << "[Drone" << m_sysId << "] Starting batch upload of" << m_paramUploadTotal << "parameters to drone";
+
+    if (!m_paramUploadTimer) {
+        m_paramUploadTimer = new QTimer(this);
+        connect(m_paramUploadTimer, &QTimer::timeout, this, &DroneVehicle::processNextParamUpload);
+    }
+    m_paramUploadTimer->start(15);
+}
+
+void DroneVehicle::processNextParamUpload()
+{
+    if (m_paramUploadCurrent >= m_pendingParamUploads.size()) {
+        if (m_paramUploadTimer) m_paramUploadTimer->stop();
+        m_paramUploadActive = false;
+        emit paramUploadActiveChanged();
+        emit paramUploadProgressChanged();
+
+        m_lastStatusText = QString("[%1] All %2 parameters successfully updated in vehicle").arg(m_name).arg(m_paramUploadTotal);
+        emit statusTextReceived();
+        addFlightLog("INFO", QString("Uploaded and updated all %1 parameters in vehicle").arg(m_paramUploadTotal));
+        emit parametersChanged();
+        emit paramUploadComplete(m_paramUploadTotal, true);
+        qDebug() << "[Drone" << m_sysId << "] Finished uploading all" << m_paramUploadTotal << "parameters to drone";
+        return;
+    }
+
+    QVariantMap item = m_pendingParamUploads[m_paramUploadCurrent].toMap();
+    QString name = item.value("name").toString().trimmed().toUpper();
+    float value = item.value("value").toFloat();
+    uint8_t typeCode = static_cast<uint8_t>(item.value("typeCode", 9).toUInt());
+
+    sendMavlinkParam(name.toLatin1().constData(), value, typeCode);
+    m_paramValues[name] = value;
+    m_parameters[name] = value;
+
+    m_paramUploadCurrent++;
+    emit paramUploadCurrentChanged();
+    emit paramUploadProgressChanged();
+}
+
 void DroneVehicle::fetchGeofenceFromDrone()
 {
     m_fetchingFence = true;
