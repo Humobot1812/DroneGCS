@@ -12,13 +12,14 @@
 [![Qt](https://img.shields.io/badge/Qt-6.2.4%20%7C%20QML-41CD52?style=for-the-badge&logo=qt)](https://www.qt.io/)
 [![C++](https://img.shields.io/badge/C%2B%2B-17-00599C?style=for-the-badge&logo=c%2B%2B)](https://isocpp.org/)
 [![Protocol](https://img.shields.io/badge/Protocol-MAVLink%20v2-red?style=for-the-badge)](https://mavlink.io/)
+[![3D Engine](https://img.shields.io/badge/3D%20Engine-CesiumJS%20%7C%20WebGL-6ba539?style=for-the-badge)](https://cesium.com/)
 
 <p align="center">
   <a href="#overview">Overview</a> •
   <a href="#interface-showcase">Interface Showcase</a> •
   <a href="#key-features">Key Features</a> •
-  <a href="#px4-and-ardupilot-parity">Autopilot Architecture</a> •
-  <a href="#system-architecture">Architecture</a> •
+  <a href="#autopilot-architecture">Autopilot Architecture</a> •
+  <a href="#system-architecture">System Architecture</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#building-from-source">Building from Source</a> •
   <a href="#developer">Developer</a> •
@@ -31,9 +32,9 @@
 
 ## Overview
 
-**DroneGCS** is a high-performance, tactical Ground Control Station (GCS) designed from the ground up for modern multi-rotor, fixed-wing, and VTOL uncrewed aerial vehicles. Built using **C++17**, **Qt 6**, **QML**, and **MAVLink v2**, DroneGCS delivers an ultra-responsive, military-inspired cockpit interface with millisecond telemetry latency, interactive geospatial situational awareness, live HD video pipelines, an autonomous mission planner, and an integrated **Tactical AI Copilot powered by Google Gemini AI**.
+**DroneGCS** is a high-performance, military-inspired Ground Control Station (GCS) engineered from the ground up for modern multi-rotor, fixed-wing, and VTOL uncrewed aerial vehicles. Built using **C++17**, **Qt 6**, **QML**, and **MAVLink v2**, DroneGCS provides an ultra-responsive aerospace operational workstation with millisecond telemetry latency, interactive 2D/3D geospatial situational awareness, live HD video pipelines, an autonomous mission planner, and an integrated **Tactical AI Copilot powered by Google Gemini AI**.
 
-Whether conducting field operations with flight controllers (Pixhawk, Cube, ArduPilot, PX4) via USB/Telemetry Radios, connecting to Software-in-the-Loop (SITL) simulators over TCP/UDP, or orchestrating multi-vehicle fleet missions, DroneGCS provides total command, parameter tuning, and telemetry oversight.
+Whether conducting field operations with physical flight controllers (Pixhawk, Cube, Matek, ArduPilot, PX4) via USB or long-range Telemetry Radios, connecting to Software-in-the-Loop (SITL) simulators over TCP/UDP, or orchestrating multi-vehicle fleet missions, DroneGCS delivers total command, dynamic parameter tuning, and telemetry oversight.
 
 ---
 
@@ -80,11 +81,11 @@ The Geofence Safety Console allows operators to establish cylindrical boundaries
 ---
 
 ### Unified Flight Dynamics Tuning and Parameter Management
-Fine-tune mission flight dynamics on the fly. The Unified Autopilot Tuning system bridges ArduPilot and PX4 parameter sets into a single intuitive control panel for Return-to-Launch (RTL) speed, yaw turn rate, and auto-yaw behavior.
+Fine-tune mission flight dynamics on the fly. The Unified Autopilot Tuning system bridges ArduPilot and PX4 parameter sets into a single intuitive control panel for Return-to-Launch (RTL) speed, yaw turn rate, and auto-yaw behavior with full parameter batch upload capabilities.
 
 <div align="center">
   <img src="docs/screenshots/05_vehicle_parameters_tuning.png" alt="Vehicle Parameters and Tuning" width="95%" />
-  <p><em>Unified Flight Dynamics Tuning: Instant adjustments for RTL speed, yaw rate, and waypoint auto-facing with full MAVLink parameter synchronization.</em></p>
+  <p><em>Unified Flight Dynamics Tuning: Instant adjustments for RTL speed, yaw rate, and waypoint auto-facing with full MAVLink parameter synchronization and 1-click batch upload.</em></p>
 </div>
 
 ---
@@ -121,10 +122,15 @@ To eliminate accidental operator errors, critical vehicle states (Arming, Takeof
 | <img src="docs/screenshots/11_dynamic_flight_modes.png" alt="Dynamic Flight Modes" width="100%" /> | <img src="docs/screenshots/12_flight_recorder_telemetry_logs.png" alt="Flight Recorder Logs" width="100%" /> |
 | *Dynamic mode selection with automatic migration between ArduPilot and PX4.* | *Chronological event logger with map track replay and CSV telemetry export.* |
 
+| Connection Manager (Serial) | Connection Manager (UDP Inbound) | Connection Manager (TCP Simulator) |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/13_connection_manager_serial.png" alt="Connection Manager Serial" width="100%" /> | <img src="docs/screenshots/14_connection_manager_udp.png" alt="Connection Manager UDP" width="100%" /> | <img src="docs/screenshots/15_connection_manager_tcp.png" alt="Connection Manager TCP" width="100%" /> |
+| *USB & Telemetry Radio auto-detection.* | *UDP broadcast and companion listener.* | *SITL simulator connection endpoints.* |
+
 | Flight Safety Configuration | Real-Time Voice Annunciator | Telemetry Configuration |
 | :---: | :---: | :---: |
 | <img src="docs/screenshots/17_settings_flight_safety.png" alt="Settings Flight Safety" width="100%" /> | <img src="docs/screenshots/18_settings_audio_voice.png" alt="Settings Audio Voice" width="100%" /> | <img src="docs/screenshots/19_settings_telemetry.png" alt="Settings Telemetry" width="100%" /> |
-| *Default altitudes and autopilot auto-detection.* | *Tactical speech engine and vocal timbre profiles.* | *MAVLink broadcast ID and default ports.* |
+| *Critical battery failsafe, altitudes, autopilot detection.* | *Tactical speech engine and vocal timbre profiles.* | *MAVLink broadcast ID, stream rates, and ports.* |
 
 | Map and Offline Cache Settings | Google Gemini AI Engine Setup | System Architecture and Credits |
 | :---: | :---: | :---: |
@@ -135,72 +141,79 @@ To eliminate accidental operator errors, critical vehicle states (Arming, Takeof
 
 ## Key Features
 
-### Multi-Drone Fleet and Swarm Management
-* **Multi-Vehicle Support**: Connect, monitor, and command multiple drones concurrently with independent telemetry states.
+### 1. Geospatial Tactical Map Engine (2D & 3D Real-Time Geospatial Environment)
+* **2D & 3D Map Switching**: Seamlessly toggle between high-performance 2D Leaflet cartography and a full interactive 3D CesiumJS geospatial globe within the primary Map workspace.
+* **Real-Time 3D Drone Model**: Displays a high-contrast 3D airframe reflecting live telemetry (latitude, longitude, relative/absolute altitude, heading, roll, pitch, yaw) with smooth interpolation to eliminate visual jitter.
+* **4 Dynamic 3D Camera Modes**:
+  * **Free Camera**: Orbit, pan, rotate, and tilt freely with intuitive mouse controls.
+  * **Follow Drone**: Dynamic chase cam locked to the vehicle's position and orientation.
+  * **Top-Down**: Orthographic nadir view for tactical situational awareness.
+  * **Overview**: High-angle tactical overview of the entire operational theater.
+* **3D Mission Trajectory Visualization**: Renders true-to-scale 3D waypoint paths, differentiating between completed (dimmed cyan) and upcoming (bright yellow/orange) flight segments, with waypoint labels and post-mission RTL return vectors.
+* **Interactive Mapping Layers**: Powered by an embedded Leaflet/WebEngine core with seamless tile switching (Google Satellite, Google Hybrid, ESRI Satellite, OpenStreetMap, Tactical Dark, Google Terrain).
+* **Dynamic Vehicle Markers**: Real-time heading-aligned aircraft icons, home position markers, and animated breadcrumb trails.
+
+### 2. Autonomous Waypoint & Mission Planning Engine
+* **Interactive Waypoint Editor**: Point-and-click waypoint sequencing with altitude AGL, speed, acceptance radius, and loiter time controls.
+* **Full MAVLink Mission Command Protocol**: Supports `MAV_CMD_NAV_WAYPOINT`, `MAV_CMD_NAV_LOITER_UNLIM`, `MAV_CMD_NAV_LOITER_TURNS`, `MAV_CMD_NAV_LOITER_TIME`, `MAV_CMD_NAV_RETURN_TO_LAUNCH`, `MAV_CMD_NAV_LAND`, and `MAV_CMD_NAV_TAKEOFF`.
+* **Survey & Grid Missions**: Automated flight path generation for aerial mapping, agricultural surveillance, and photogrammetry with configurable transect grid spacing and overlap.
+* **Mission Elevation Clearance Profile**: Interactive 3D terrain profile calculating ground clearance along the flight trajectory with Controlled Flight Into Terrain (CFIT) warnings.
+* **Dynamic Safe Return Radius**: Computes and draws maximum operational return boundary based on current vehicle battery capacity, wind, and distance to Home.
+* **Non-Destructive RTL Mission Integration**: Automatically appends Return-To-Launch after the final user waypoint, strictly preserving all operator waypoints without overwriting.
+* **Mission Upload Voice Confirmation**: Voice Annunciator announces *"Mission uploaded, ready for auto mode"* upon successful mission synchronization.
+
+### 3. Unified Vehicle Parameters & Batch Upload Subsystem
+* **One-Click Batch Parameter Upload**: Primary `Upload All to Drone (N)` button transmits the entire parameter tree directly into the vehicle's onboard autopilot memory at once.
+* **Paced MAVLink Transmission**: Implements 15ms packet pacing in C++ (`uploadAllParameters`) to prevent buffer overflow and telemetry packet drops over serial and SiK/RFD900 radio links.
+* **Direct Parameter Injection (`+ Add Parameter`)**: Modal dialog with auto-presets for ArduPilot (`WPNAV_SPEED`, `RTL_ALT`, `RTL_SPEED`, `WPNAV_YAW_RATE`, `BATT_ARM_VOLT`, `FENCE_ACTION`) and PX4 (`MPC_XY_CRUISE`, `MPC_LAND_SPEED`, `MPC_YAWRAUTO_MAX`, `GF_ACTION`, `MIS_TAKEOFF_ALT`).
+* **Supported Parameter Data Types**: Typed MAVLink `PARAM_SET` handling for `REAL32 (Float)`, `INT32`, `INT16`, and `INT8`.
+* **Inline Table Editing**: Double-click any parameter value to modify inline with modified tracking badges (`MODIFIED`).
+* **Clean Feedback & Voice Callout**: Animated top notification banner and voice announcement (*"Parameter uploaded"*).
+
+### 4. Flight Dynamics Tuning Panel (ArduPilot + PX4 Unified)
+* **Return-to-Launch Speed**: Adjusts Return-to-Launch transit cruising velocity (`RTL_SPEED` / `WPNAV_SPEED` on ArduPilot; `MPC_XY_CRUISE` on PX4).
+* **Yaw Turn Rate**: Controls maximum auto-flight turn rate in deg/s (`WPNAV_YAW_RATE` on ArduPilot; `MPC_YAWRAUTO_MAX` on PX4).
+* **Auto-Yaw Behavior**: Toggles whether the vehicle automatically faces active waypoints during mission flight (`WP_YAW_BEHAVIOR` on ArduPilot; `MPC_YAW_MODE` on PX4).
+
+### 5. Multi-Drone Fleet & Swarm Management
+* **Multi-Vehicle Support**: Connect, monitor, and command multiple drones concurrently with independent telemetry states and command queues.
 * **Instant Vehicle Switching**: Seamlessly toggle active control between airframes via the fleet selector bar.
 * **Live Fleet Status Overview**: At-a-glance monitoring of battery state, flight modes, satellite lock, and comms links across all active vehicles.
 
-### Tactical Glass Cockpit and Primary Flight Display
+### 6. Tactical Glass Cockpit & Primary Flight Display
 * **Primary Flight Display (PFD)**: High-fps Artificial Horizon / Attitude Indicator with pitch ladder and roll scale.
 * **Vertical Tape Gauges**: Real-time indicated airspeed, groundspeed, barometric altitude, and climb rate (variometer).
 * **Compass Rose**: Dynamic heading tape with home vector, target waypoint bearing, and ground track visualization.
 * **Subsystem Vital Signs**: Battery voltage, current draw, remaining capacity percentage, link signal quality (RSSI), GPS fix type (3D/RTK), satellite count, and HDOP/VDOP metrics.
 
-### Tactical AI Copilot (Google Gemini AI)
+### 7. Tactical AI Copilot (Google Gemini AI)
 * **Autonomous Intelligence**: Embedded copilot powered by Google Gemini AI with access to real-time UAV state and telemetry context.
 * **Natural Language UAV Command**: Command takeoff, return-to-launch, mode transitions, or mission pause using conversational English.
 * **Automated SITREP Reports**: Instant situational awareness summaries detailing position, battery endurance, navigation target, and safety status.
 
-### Geospatial Tactical Map Engine (2D & 3D Real-Time Geospatial Environment)
-* **2D & 3D Map Switching**: Seamlessly toggle between high-performance 2D Leaflet cartography and a full interactive 3D CesiumJS geospatial globe within the primary Map workspace.
-* **Real-Time 3D Drone Model**: Displays a high-contrast 3D airframe reflecting live telemetry (latitude, longitude, relative/absolute altitude, heading, roll, pitch, yaw).
-* **3D Camera Navigation Modes**:
-  * **Free Camera**: Orbit, pan, rotate, and tilt freely with mouse controls.
-  * **Follow Drone**: Dynamic chase cam locked to the vehicle's position and orientation.
-  * **Top-Down**: Orthographic nadir view for tactical situational awareness.
-  * **Overview**: High-angle tactical overview of the operational theater.
-* **3D Mission Visualization**: Renders true-to-scale 3D waypoint paths, differentiating between completed (dimmed cyan) and upcoming (bright yellow/orange) flight segments, with waypoint labels and post-mission RTL return vectors.
-* **Interactive Mapping**: Powered by an embedded Leaflet/WebEngine core with seamless tile switching (Google Satellite, Google Hybrid, ESRI Satellite, OpenStreetMap, Tactical Dark, Google Terrain).
-* **Dynamic Vehicle Markers**: Real-time heading-aligned aircraft icons, home position markers, and animated breadcrumb trails.
-* **Interactive Waypoint Editor**: Point-and-click waypoint sequencing with altitude, speed, acceptance radius, and loiter time controls.
-* **Survey and Grid Missions**: Automated flight path generation for aerial mapping and reconnaissance.
-* **Mission Elevation Profile**: Interactive elevation chart displaying planned flight trajectory against terrain data with clearance warnings.
+### 8. Safety, Geofencing & Pre-Flight Diagnostics
+* **Interactive Geofence Console**: Configure circular and polygonal keep-in/keep-out safety boundaries with ceiling and floor constraints.
+* **Bidirectional Geofence Sync**: Upload safety fences directly to the autopilot, or automatically download pre-existing geofences stored on the drone.
+* **Critical Battery RTL Failsafe**: Automatic Return-to-Launch triggered when vehicle battery drops below 10%, with a user-configurable on/off master toggle in Flight Safety Settings.
+* **Slide-to-Confirm Arming**: Safeguarded tactile sliders for critical flight commands (Arm, Disarm, Takeoff, Return-to-Launch, Land, Emergency Kill).
+* **Pre-Flight Checklist Engine**: Interactive pre-arm verification covering IMU calibration, GPS lock, battery threshold, RC link, and motor readiness.
+* **Spoken Voice Annunciator**: Auditory callouts for critical flight events (Arming state, flight mode transitions, battery warnings, geofence breaches, and mission/parameter uploads).
 
-### Unified Vehicle Parameters & Batch Upload Subsystem
-* **One-Click Batch Parameter Upload**: Primary `Upload All to Drone` action transmits the entire parameter tree to onboard autopilot memory at once.
-* **Paced MAVLink Transmission**: Implements 15ms packet pacing to prevent buffer overflow and telemetry packet drops over serial and SiK/RFD900 radio links.
-* **Real-Time Progress & Annunciation**: Live percentage progress bar with audio and toast confirmation (*"Parameter uploaded"*).
-* **Direct Parameter Injection**: Add and upload new custom parameters directly with type selection (`REAL32`, `INT32`, `INT16`, `INT8`) and auto-presets for ArduPilot and PX4.
-* **Inline Table Editing**: Double-click any parameter value to modify inline with instant modified tracking badges.
+### 9. Real-Time Analytics, Flight Recorder & Replay
+* **Live Telemetry Oscilloscope**: Multi-channel real-time charting for altitude, airspeed, battery voltage, climb rate, and current.
+* **Flight Playback and Recording**: Review and analyze historic missions with variable-speed playback, scrub bar, and telemetry overlays.
+* **CSV Log Export**: Export comprehensive flight logs for post-mission engineering analysis.
 
-### Universal 1-Click Auto-Connect
+### 10. Live HD Video Pipeline
+* **GStreamer Integration**: Ultra-low-latency video reception supporting RTSP, UDP RTP, and H.264 video streams.
+* **Picture-in-Picture (PiP)**: Draggable, floating video overlay directly over the tactical map.
+
+### 11. Universal 1-Click Auto-Connect
 * **Multi-Transport Scanning Engine**:
   * **Serial**: Automatically detects and prioritizes flight controller interfaces (`/dev/ttyACM*`, `/dev/ttyUSB*`, FTDI, SiK radios) at 57600 and 115200 baud.
   * **UDP**: Listens concurrently across all standard MAVLink telemetry ports (`14550`, `14551`, `14552`, `18570`).
   * **TCP**: Probes ArduPilot and PX4 SITL simulator endpoints (`127.0.0.1:5760`, `5761`, `5762`, `14550`).
 * **Visual Interface Dialog**: Dedicated tabs for Serial, UDP, and TCP manual connections alongside 1-click Auto-Connect.
-
-| Serial Connection | UDP Inbound Connection | TCP SITL Simulator Connection |
-| :---: | :---: | :---: |
-| <img src="docs/screenshots/13_connection_manager_serial.png" alt="Connection Manager Serial" width="100%" /> | <img src="docs/screenshots/14_connection_manager_udp.png" alt="Connection Manager UDP" width="100%" /> | <img src="docs/screenshots/15_connection_manager_tcp.png" alt="Connection Manager TCP" width="100%" /> |
-
-### Safety, Geofencing, and Pre-Flight Diagnostics
-* **Interactive Geofence Console**: Configure circular and polygonal keep-in/keep-out safety boundaries with ceiling and floor constraints.
-* **Bidirectional Geofence Sync**: Upload safety fences directly to the autopilot, or automatically download pre-existing geofences stored on the drone.
-* **Critical Battery RTL Failsafe**: Automatic Return-to-Launch triggered when vehicle battery drops below 10%, with a user-configurable on/off master toggle in Flight Safety Settings.
-* **Non-Destructive RTL Mission Integration**: Automatically appends Return-To-Launch after the final user waypoint, strictly preserving all planned waypoints.
-* **Slide-to-Confirm Arming**: Safeguarded tactile sliders for critical flight commands (Arm, Disarm, Takeoff, Return-to-Launch, Land, Emergency Kill).
-* **Pre-Flight Checklist Engine**: Interactive pre-arm verification covering IMU calibration, GPS lock, battery threshold, RC link, and motor readiness.
-* **Spoken Voice Annunciator**: Auditory callouts for critical flight events (Arming state, flight mode transitions, battery warnings, geofence breaches, and *"Mission uploaded, ready for auto mode"*).
-
-### Real-Time Analytics and Flight Log Replay
-* **Live Telemetry Oscilloscope**: Multi-channel real-time charting for altitude, airspeed, battery voltage, climb rate, and current.
-* **Flight Playback and Recording**: Review and analyze historic missions with variable-speed playback, scrub bar, and telemetry overlays.
-* **CSV Log Export**: Export comprehensive flight logs for post-mission engineering analysis.
-
-### Live HD Video Pipeline
-* **GStreamer Integration**: Ultra-low-latency video reception supporting RTSP, UDP RTP, and H.264 video streams.
-* **Picture-in-Picture (PiP)**: Draggable, floating video overlay directly over the tactical map.
 
 ---
 
@@ -223,7 +236,7 @@ The Quick Flight Dynamics Tuning panel abstracts underlying autopilot parameters
 |:---|:---|:---|:---|
 | **Return-to-Launch Speed** | `RTL_SPEED` / `WPNAV_SPEED` | `MPC_XY_CRUISE` | Autonomous transit speed when returning to home coordinate |
 | **Yaw Turn Rate** | `WPNAV_YAW_RATE` | `MPC_YAWRAUTO_MAX` | Maximum angular turn rate during autonomous heading adjustments |
-| **Auto-Yaw Behavior** | `WP_YAW_BEHAVIOR` (1 vs 0) | `MIS_YAW_TGT` | Determines whether the drone faces the active waypoint or maintains heading |
+| **Auto-Yaw Behavior** | `WP_YAW_BEHAVIOR` (1 vs 0) | `MPC_YAW_MODE` (0 vs 4) | Determines whether the drone faces the active waypoint or maintains heading |
 
 ### Bidirectional Mission and Geofence Protocol
 * **Mission Synchronization**: Implements `MISSION_REQUEST_LIST`, `MISSION_ITEM_INT`, and `MISSION_ACK` (handling modern MAVLink opaque identifiers) for bidirectional waypoint upload and download.
@@ -236,7 +249,7 @@ The Quick Flight Dynamics Tuning panel abstracts underlying autopilot parameters
 ```
 +------------------------------------------------------------------------+
 |                        DroneGCS User Interface                         |
-|   Tactical Cockpit  |  Map Engine  |  Mission Planner  |  AI Copilot   |
+|   Tactical Cockpit  |  2D/3D Map Engine  | Mission Planner | AI Copilot|
 +------------------------------------------------------------------------+
 |                       Qt 6 / QML Presentation Layer                     |
 |    Quick Controls 2 (Tactical Dark)  |  Custom Canvas / SVG Visuals    |
